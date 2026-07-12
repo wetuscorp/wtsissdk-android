@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wts.is/schemas/sdk/v1/deferred-resolve-request.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "clientEventId", "installId", "occurredAt", "metadata", "referrer"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "clientEventId": { "type": "string", "format": "uuid" },
+    "installId": { "type": "string", "minLength": 8, "maxLength": 128 },
+    "occurredAt": { "type": "string", "format": "date-time" },
+    "referrer": { "type": "string", "minLength": 1, "maxLength": 2048 },
+    "metadata": { "$ref": "common.schema.json#/$defs/metadata" }
+  }
+}

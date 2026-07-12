@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wts.is/schemas/sdk/v1/event-batch.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "events"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "events": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 50,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "schemaVersion",
+          "clientEventId",
+          "installId",
+          "occurredAt",
+          "metadata",
+          "eventKey",
+          "properties"
+        ],
+        "properties": {
+          "schemaVersion": { "const": 1 },
+          "clientEventId": { "type": "string", "format": "uuid" },
+          "installId": { "type": "string" },
+          "occurredAt": { "type": "string", "format": "date-time" },
+          "metadata": { "$ref": "common.schema.json#/$defs/metadata" },
+          "eventKey": { "type": "string", "pattern": "^[a-z][a-z0-9_]{1,63}$" },
+          "properties": {
+            "type": "object",
+            "maxProperties": 20,
+            "additionalProperties": { "$ref": "common.schema.json#/$defs/scalar" }
+          },
+          "linkId": { "type": "string" },
+          "revenue": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["amount", "currency"],
+            "properties": {
+              "amount": { "type": "string" },
+              "currency": { "type": "string", "pattern": "^[A-Z]{3}$" }
+            }
+          }
+        }
+      }
+    }
+  }
+}

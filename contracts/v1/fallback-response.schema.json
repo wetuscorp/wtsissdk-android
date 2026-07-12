@@ -1,0 +1,8 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wts.is/schemas/sdk/v1/fallback-response.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["accepted"],
+  "properties": { "accepted": { "const": true } }
+}

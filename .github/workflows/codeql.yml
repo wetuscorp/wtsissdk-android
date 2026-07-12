@@ -1,0 +1,21 @@
+name: CodeQL
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '23 3 * * 1'
+permissions:
+  contents: read
+  security-events: write
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
+        with: { distribution: temurin, java-version: '17' }
+      - uses: github/codeql-action/init@v4
+        with: { languages: java-kotlin, build-mode: manual }
+      - run: ./gradlew :sdk:assembleDebug
+      - uses: github/codeql-action/analyze@v4
