@@ -8,7 +8,7 @@ Official SDK for verified Android App Links, deterministic Play Install Referrer
 
 ```kotlin
 dependencies {
-    implementation("co.wetus:wts-sdk-android:0.1.0-alpha.1")
+    implementation("co.wetus:wts-sdk:0.1.0-alpha.1")
 }
 ```
 

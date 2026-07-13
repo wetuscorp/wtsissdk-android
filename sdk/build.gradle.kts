@@ -41,7 +41,7 @@ mavenPublishing {
     if (providers.gradleProperty("signingInMemoryKey").isPresent) {
         signAllPublications()
     }
-    coordinates("co.wetus", "wts-sdk-android", version.toString())
+    coordinates("co.wetus", "wts-sdk", version.toString())
     pom {
         name.set("wts.is Android SDK")
         description.set("Official wts.is deep-link and mobile attribution SDK")
