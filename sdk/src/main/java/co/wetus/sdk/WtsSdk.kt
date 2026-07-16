@@ -7,14 +7,22 @@ import co.wetus.sdk.internal.EventBatch
 import co.wetus.sdk.internal.EventBatchResponse
 import co.wetus.sdk.internal.EventRequest
 import co.wetus.sdk.internal.EventStore
+import co.wetus.sdk.internal.IdentityContext
+import co.wetus.sdk.internal.IdentityMutationBatch
+import co.wetus.sdk.internal.IdentityMutationBatchResponse
+import co.wetus.sdk.internal.IdentityMutationRequest
+import co.wetus.sdk.internal.IdentityMutationStore
 import co.wetus.sdk.internal.Metadata
 import co.wetus.sdk.internal.PlayReferrerSource
 import co.wetus.sdk.internal.PreferencesEventStore
+import co.wetus.sdk.internal.PreferencesIdentityMutationStore
 import co.wetus.sdk.internal.ReferrerSource
 import co.wetus.sdk.internal.ResolveCache
 import co.wetus.sdk.internal.ResolveRequest
 import co.wetus.sdk.internal.ResolveResponse
 import co.wetus.sdk.internal.RevenueWire
+import co.wetus.sdk.internal.ReportedAttributionWire
+import co.wetus.sdk.internal.UserUpdateWire
 import java.io.IOException
 import java.net.SocketTimeoutException
 import java.util.UUID
@@ -32,6 +40,8 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonPrimitive
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -44,6 +54,7 @@ class WtsSdk internal constructor(
     private val options: WtsOptions,
     private val client: OkHttpClient,
     private val store: EventStore,
+    private val identityStore: IdentityMutationStore,
     private val referrerSource: ReferrerSource,
 ) {
     private val appContext = context.applicationContext
@@ -57,6 +68,8 @@ class WtsSdk internal constructor(
         }
     private var retryAttempt = 0
     private var retryJob: Job? = null
+    private var profileConsentGranted = false
+    private var identitySessionId = UUID.randomUUID().toString().lowercase()
 
     suspend fun handle(uri: Uri): WtsDeepLink {
         val source = unwrap(uri)
@@ -68,7 +81,7 @@ class WtsSdk internal constructor(
             url = key,
         )
         val response: ResolveResponse = post(
-            "sdk/resolve",
+            "sdk/v2/resolve",
             json.encodeToString(ResolveRequest.serializer(), request),
             ResolveResponse.serializer(),
             source,
@@ -91,7 +104,7 @@ class WtsSdk internal constructor(
         )
         return try {
             val response: ResolveResponse = post(
-                "sdk/deferred-resolve",
+                "sdk/v2/deferred-resolve",
                 json.encodeToString(DeferredRequest.serializer(), request),
                 ResolveResponse.serializer(),
                 null,
@@ -126,29 +139,142 @@ class WtsSdk internal constructor(
         scheduleFlush(0)
     }
 
+    fun setProfileConsent(consent: WtsProfileConsent) {
+        if (consent == WtsProfileConsent.GRANTED) {
+            profileConsentGranted = true
+            return
+        }
+        profileConsentGranted = false
+        if (!identityStore.save(emptyList())) throw WtsSdkException.Storage
+        enqueueIdentity(type = "reset_identity")
+        identitySessionId = UUID.randomUUID().toString().lowercase()
+    }
+
+    suspend fun identify(
+        externalUserId: String,
+        attributes: Map<String, WtsUserValue> = emptyMap(),
+    ) {
+        requireProfileConsent()
+        if (externalUserId.isEmpty() || externalUserId.length > 128) {
+            throw WtsSdkException.InvalidProfile(
+                "externalUserId must contain 1 to 128 characters.",
+            )
+        }
+        validateAttributes(attributes)
+        enqueueIdentity(
+            type = "identify",
+            externalUserId = externalUserId,
+            attributes = attributes.takeIf { it.isNotEmpty() }?.toUserJson(),
+        )
+    }
+
+    suspend fun updateUser(update: WtsUserUpdate) {
+        requireProfileConsent()
+        validateUpdate(update)
+        enqueueIdentity(
+            type = "update_user",
+            operations = UserUpdateWire(
+                set = update.set.takeIf { it.isNotEmpty() }?.toUserJson(),
+                setOnce = update.setOnce.takeIf { it.isNotEmpty() }?.toUserJson(),
+                unset = update.unset.takeIf { it.isNotEmpty() },
+                increment = update.increment.takeIf { it.isNotEmpty() },
+            ),
+        )
+    }
+
+    suspend fun setReportedAttribution(attribution: WtsReportedAttribution) {
+        requireProfileConsent()
+        if (attribution.source.trim().isEmpty() || attribution.source.length > 120) {
+            throw WtsSdkException.InvalidProfile(
+                "Attribution source must contain 1 to 120 characters.",
+            )
+        }
+        enqueueIdentity(
+            type = "reported_attribution",
+            attribution = ReportedAttributionWire.from(attribution),
+        )
+    }
+
+    suspend fun resetIdentity() {
+        requireProfileConsent()
+        enqueueIdentity(type = "reset_identity")
+        identitySessionId = UUID.randomUUID().toString().lowercase()
+    }
+
     suspend fun flush() {
+        try {
+            flushIdentity()
+        } catch (_: Throwable) {
+            scheduleRetry()
+            return
+        }
         val queued = store.load()
         if (queued.isEmpty()) { retryAttempt = 0; return }
         val batch = queued.take(50).toMutableList()
         while (batch.size > 1 && encodedBatchSize(batch) > 65_536) batch.removeAt(batch.lastIndex)
         try {
             val response: EventBatchResponse = post(
-                "sdk/events/batch",
+                "sdk/v2/events/batch",
                 json.encodeToString(EventBatch.serializer(), EventBatch(events = batch)),
                 EventBatchResponse.serializer(),
                 null,
             )
             val terminal = (response.accepted + response.duplicates +
                 response.rejected.filterNot { it.retryable }.map { it.clientEventId }).toSet()
-            if (!store.save(queued.filterNot { it.clientEventId in terminal })) throw WtsSdkException.Storage
-            retryAttempt = 0
-            if (queued.size > batch.size) scheduleFlush(0)
+            val remaining = queued.filterNot { it.clientEventId in terminal }
+            if (!store.save(remaining)) throw WtsSdkException.Storage
+            if (response.rejected.any { it.retryable }) {
+                scheduleRetry()
+            } else {
+                retryAttempt = 0
+                if (remaining.isNotEmpty()) scheduleFlush(0)
+            }
         } catch (error: WtsSdkException.Server) {
             if (error.statusCode in 400..499 && error.statusCode != 429) {
                 store.save(queued.drop(batch.size))
                 log(WtsLogLevel.ERROR, "Discarded an invalid event batch (HTTP ${error.statusCode}).")
             } else scheduleRetry()
         } catch (_: Throwable) { scheduleRetry() }
+    }
+
+    private suspend fun flushIdentity() {
+        val queued = identityStore.load()
+        if (queued.isEmpty()) return
+        val batch = queued.take(50).toMutableList()
+        while (batch.size > 1 && encodedIdentityBatchSize(batch) > 65_536) {
+            batch.removeAt(batch.lastIndex)
+        }
+        try {
+            val response: IdentityMutationBatchResponse = post(
+                "sdk/v2/identity/mutations",
+                json.encodeToString(
+                    IdentityMutationBatch.serializer(),
+                    IdentityMutationBatch(mutations = batch),
+                ),
+                IdentityMutationBatchResponse.serializer(),
+                null,
+            )
+            val terminal = (
+                response.accepted +
+                    response.duplicates +
+                    response.rejected.filterNot { it.retryable }.map { it.clientMutationId }
+                ).toSet()
+            val remaining = queued.filterNot { it.clientMutationId in terminal }
+            if (!identityStore.save(remaining)) {
+                throw WtsSdkException.Storage
+            }
+            if (response.rejected.any { it.retryable }) throw RetryableBatchRejection()
+        } catch (error: WtsSdkException.Server) {
+            if (error.statusCode in 400..499 && error.statusCode != 429) {
+                identityStore.save(queued.drop(batch.size))
+                log(
+                    WtsLogLevel.ERROR,
+                    "Discarded an invalid identity batch (HTTP ${error.statusCode}).",
+                )
+                return
+            }
+            throw error
+        }
     }
 
     private suspend fun <T> post(
@@ -199,6 +325,111 @@ class WtsSdk internal constructor(
         }
     })
 
+    private fun Map<String, WtsUserValue>.toUserJson() = JsonObject(
+        mapValues { (_, value) -> value.toJson() },
+    )
+
+    private fun WtsUserValue.toJson(): JsonElement = when (this) {
+        is WtsUserValue.StringValue -> JsonPrimitive(value)
+        is WtsUserValue.NumberValue -> JsonPrimitive(value)
+        is WtsUserValue.BooleanValue -> JsonPrimitive(value)
+        is WtsUserValue.DateValue -> JsonPrimitive(value)
+        is WtsUserValue.StringArrayValue -> JsonArray(value.map(::JsonPrimitive))
+    }
+
+    private fun enqueueIdentity(
+        type: String,
+        externalUserId: String? = null,
+        attributes: JsonObject? = null,
+        operations: UserUpdateWire? = null,
+        attribution: ReportedAttributionWire? = null,
+    ) {
+        val mutation = IdentityMutationRequest(
+            identity = IdentityContext(
+                installId = installId,
+                sessionId = identitySessionId,
+            ),
+            type = type,
+            externalUserId = externalUserId,
+            attributes = attributes,
+            operations = operations,
+            attribution = attribution,
+            metadata = Metadata.current(appContext),
+        )
+        if (encodedIdentityBatchSize(listOf(mutation)) > 65_536) {
+            throw WtsSdkException.InvalidProfile("Identity mutation cannot exceed 64 KiB.")
+        }
+        val queue = identityStore.load().toMutableList().apply {
+            add(mutation)
+            while (size > 100 || encodedIdentityBatchSize(this) > 1_048_576) removeAt(0)
+        }
+        if (!identityStore.save(queue)) throw WtsSdkException.Storage
+        scheduleFlush(0)
+    }
+
+    private fun requireProfileConsent() {
+        if (!profileConsentGranted) throw WtsSdkException.ProfileConsentRequired
+    }
+
+    private fun validateAttributes(attributes: Map<String, WtsUserValue>) {
+        if (attributes.size > 50) {
+            throw WtsSdkException.InvalidProfile(
+                "A profile mutation supports at most 50 attributes.",
+            )
+        }
+        attributes.forEach { (key, value) ->
+            validateAttributeKey(key)
+            when (value) {
+                is WtsUserValue.StringValue ->
+                    if (value.value.length > 2_048) {
+                        throw WtsSdkException.InvalidProfile(
+                            "String attributes cannot exceed 2048 characters.",
+                        )
+                    }
+                is WtsUserValue.DateValue ->
+                    if (!value.value.matches(ISO_DATE)) {
+                        throw WtsSdkException.InvalidProfile(
+                            "Date attributes must use ISO-8601.",
+                        )
+                    }
+                is WtsUserValue.StringArrayValue ->
+                    if (value.value.size > 50 || value.value.any { it.length > 512 }) {
+                        throw WtsSdkException.InvalidProfile(
+                            "String-array attributes support 50 values of at most 512 characters.",
+                        )
+                    }
+                is WtsUserValue.NumberValue ->
+                    if (!value.value.isFinite()) {
+                        throw WtsSdkException.InvalidProfile("Number attributes must be finite.")
+                    }
+                is WtsUserValue.BooleanValue -> Unit
+            }
+        }
+    }
+
+    private fun validateUpdate(update: WtsUserUpdate) {
+        val keys = update.set.keys + update.setOnce.keys + update.unset + update.increment.keys
+        if (keys.isEmpty() || keys.size > 50 || keys.toSet().size != keys.size) {
+            throw WtsSdkException.InvalidProfile(
+                "Profile updates require 1 to 50 unique attribute operations.",
+            )
+        }
+        validateAttributes(update.set)
+        validateAttributes(update.setOnce)
+        (update.unset + update.increment.keys).forEach(::validateAttributeKey)
+        if (update.increment.values.any { !it.isFinite() }) {
+            throw WtsSdkException.InvalidProfile("Increment values must be finite numbers.")
+        }
+    }
+
+    private fun validateAttributeKey(key: String) {
+        if (!key.matches(ATTRIBUTE_KEY)) {
+            throw WtsSdkException.InvalidProfile(
+                "Attribute keys must use lowercase snake_case.",
+            )
+        }
+    }
+
     private fun ResolveResponse.toPublic() = WtsDeepLink(
         path = link.path,
         parameters = link.parameters.mapValues { (_, value) ->
@@ -217,6 +448,11 @@ class WtsSdk internal constructor(
     private fun encodedSize(events: List<EventRequest>) = encodedBatchSize(events)
     private fun encodedBatchSize(events: List<EventRequest>) =
         json.encodeToString(EventBatch.serializer(), EventBatch(events = events)).toByteArray().size
+    private fun encodedIdentityBatchSize(mutations: List<IdentityMutationRequest>) =
+        json.encodeToString(
+            IdentityMutationBatch.serializer(),
+            IdentityMutationBatch(mutations = mutations),
+        ).toByteArray().size
 
     private fun scheduleRetry() {
         retryAttempt = min(retryAttempt + 1, 6)
@@ -234,11 +470,14 @@ class WtsSdk internal constructor(
     }
 
     companion object {
-        const val VERSION = "0.1.0-alpha.1"
+        const val VERSION = "0.2.0-alpha.1"
         private const val PREFERENCES = "co.wetus.wts-sdk"
         private const val INSTALL_ID = "install-id"
         private const val DEFERRED_TERMINAL = "deferred-terminal-v1"
         private val JSON_MEDIA_TYPE = "application/json".toMediaType()
+        private val ATTRIBUTE_KEY = Regex("^[a-z][a-z0-9_]{0,63}$")
+        private val ISO_DATE =
+            Regex("^\\d{4}-\\d{2}-\\d{2}(?:T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?Z)?$")
         @Volatile private var instance: WtsSdk? = null
 
         fun configure(context: Context, appKey: String, options: WtsOptions = WtsOptions()): WtsSdk {
@@ -259,6 +498,7 @@ class WtsSdk internal constructor(
                         options,
                         client,
                         PreferencesEventStore(preferences, json),
+                        PreferencesIdentityMutationStore(preferences, json),
                         PlayReferrerSource(context.applicationContext),
                     ).also { sdk -> instance = sdk; sdk.scheduleFlush(0) }
                 }
@@ -268,3 +508,5 @@ class WtsSdk internal constructor(
         fun shared(): WtsSdk = instance ?: throw WtsSdkException.NotConfigured
     }
 }
+
+private class RetryableBatchRejection : Exception()

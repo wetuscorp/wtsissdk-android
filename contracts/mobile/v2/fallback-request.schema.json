@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wts.is/schemas/sdk/mobile/v2/fallback-request.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "linkId", "platform", "expiresAt", "signature"],
+  "properties": {
+    "schemaVersion": { "const": 2 },
+    "linkId": { "type": "string", "minLength": 1 },
+    "platform": { "enum": ["ios", "android"] },
+    "expiresAt": { "type": "integer", "minimum": 1 },
+    "signature": { "type": "string", "minLength": 32, "maxLength": 128 }
+  }
+}

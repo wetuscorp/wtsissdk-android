@@ -14,6 +14,38 @@ sealed interface WtsValue {
     }
 }
 
+sealed interface WtsUserValue {
+    data class StringValue(val value: String) : WtsUserValue
+    data class NumberValue(val value: Double) : WtsUserValue
+    data class BooleanValue(val value: Boolean) : WtsUserValue
+    data class DateValue(val value: String) : WtsUserValue
+    data class StringArrayValue(val value: List<String>) : WtsUserValue
+
+    companion object {
+        fun of(value: String): WtsUserValue = StringValue(value)
+        fun of(value: Number): WtsUserValue = NumberValue(value.toDouble())
+        fun of(value: Boolean): WtsUserValue = BooleanValue(value)
+        fun date(value: String): WtsUserValue = DateValue(value)
+        fun strings(value: List<String>): WtsUserValue = StringArrayValue(value)
+    }
+}
+
+data class WtsUserUpdate(
+    val set: Map<String, WtsUserValue> = emptyMap(),
+    val setOnce: Map<String, WtsUserValue> = emptyMap(),
+    val unset: List<String> = emptyList(),
+    val increment: Map<String, Double> = emptyMap(),
+)
+
+data class WtsReportedAttribution(
+    val source: String,
+    val medium: String? = null,
+    val campaign: String? = null,
+    val externalRef: String? = null,
+)
+
+enum class WtsProfileConsent { GRANTED, DENIED }
+
 data class WtsDeepLink(
     val path: String,
     val parameters: Map<String, WtsValue>,
@@ -45,15 +77,53 @@ data class WtsOptions(
 )
 
 sealed class WtsSdkException(message: String, cause: Throwable? = null) : Exception(message, cause) {
+    abstract val code: String
     open val fallbackUri: Uri? = null
-    data object NotConfigured : WtsSdkException("WtsSdk is not configured.")
-    data object InvalidAppKey : WtsSdkException("The wts.is app key is invalid.")
-    data class InvalidUrl(override val fallbackUri: Uri? = null) : WtsSdkException("The deep link URL is invalid.")
-    data class NoMatch(override val fallbackUri: Uri) : WtsSdkException("No active deep link matched the URL.")
-    data class Timeout(override val fallbackUri: Uri? = null) : WtsSdkException("The wts.is request timed out.")
-    data class Network(override val fallbackUri: Uri? = null, val error: Throwable? = null) : WtsSdkException("The wts.is request failed.", error)
-    data class Server(val statusCode: Int, override val fallbackUri: Uri? = null) : WtsSdkException("The wts.is API returned HTTP $statusCode.")
-    data class InvalidResponse(override val fallbackUri: Uri? = null) : WtsSdkException("The wts.is API response was invalid.")
-    data class InvalidEvent(val reason: String) : WtsSdkException(reason)
-    data object Storage : WtsSdkException("The wts.is local event queue could not be persisted.")
+    data object NotConfigured : WtsSdkException("WtsSdk is not configured.") {
+        override val code = "NOT_CONFIGURED"
+    }
+    data object InvalidAppKey : WtsSdkException("The wts.is app key is invalid.") {
+        override val code = "INVALID_APP_KEY"
+    }
+    data class InvalidUrl(override val fallbackUri: Uri? = null) :
+        WtsSdkException("The deep link URL is invalid.") {
+        override val code = "INVALID_URL"
+    }
+    data class NoMatch(override val fallbackUri: Uri) :
+        WtsSdkException("No active deep link matched the URL.") {
+        override val code = "NO_MATCH"
+    }
+    data class Timeout(override val fallbackUri: Uri? = null) :
+        WtsSdkException("The wts.is request timed out.") {
+        override val code = "TIMEOUT"
+    }
+    data class Network(
+        override val fallbackUri: Uri? = null,
+        val error: Throwable? = null,
+    ) : WtsSdkException("The wts.is request failed.", error) {
+        override val code = "NETWORK_ERROR"
+    }
+    data class Server(
+        val statusCode: Int,
+        override val fallbackUri: Uri? = null,
+    ) : WtsSdkException("The wts.is API returned HTTP $statusCode.") {
+        override val code = "SERVER_ERROR"
+    }
+    data class InvalidResponse(override val fallbackUri: Uri? = null) :
+        WtsSdkException("The wts.is API response was invalid.") {
+        override val code = "INVALID_RESPONSE"
+    }
+    data class InvalidEvent(val reason: String) : WtsSdkException(reason) {
+        override val code = "INVALID_EVENT"
+    }
+    data class InvalidProfile(val reason: String) : WtsSdkException(reason) {
+        override val code = "INVALID_PROFILE"
+    }
+    data object ProfileConsentRequired :
+        WtsSdkException("Profile consent must be granted before using identity APIs.") {
+        override val code = "PROFILE_CONSENT_REQUIRED"
+    }
+    data object Storage : WtsSdkException("The wts.is local event queue could not be persisted.") {
+        override val code = "STORAGE_ERROR"
+    }
 }

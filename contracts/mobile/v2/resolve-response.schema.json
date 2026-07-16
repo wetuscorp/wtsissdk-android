@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wts.is/schemas/sdk/mobile/v2/resolve-response.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["match", "attributionId", "isDeferred", "link"],
+  "properties": {
+    "match": { "const": true },
+    "attributionId": { "type": "string", "minLength": 1 },
+    "isDeferred": { "type": "boolean" },
+    "link": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "path", "parameters"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "path": { "type": "string", "pattern": "^/", "maxLength": 512 },
+        "parameters": {
+          "type": "object",
+          "maxProperties": 20,
+          "additionalProperties": { "$ref": "common.schema.json#/$defs/scalar" }
+        }
+      }
+    }
+  }
+}

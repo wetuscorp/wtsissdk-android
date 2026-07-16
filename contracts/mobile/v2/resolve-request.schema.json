@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wts.is/schemas/sdk/mobile/v2/resolve-request.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "clientEventId", "installId", "occurredAt", "metadata", "url"],
+  "properties": {
+    "schemaVersion": { "const": 2 },
+    "clientEventId": { "type": "string", "format": "uuid" },
+    "installId": { "type": "string", "minLength": 8, "maxLength": 128 },
+    "occurredAt": { "type": "string", "format": "date-time" },
+    "url": { "type": "string", "format": "uri" },
+    "metadata": { "$ref": "common.schema.json#/$defs/metadata" }
+  }
+}

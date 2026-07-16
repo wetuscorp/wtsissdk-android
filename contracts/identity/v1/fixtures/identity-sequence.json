@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "mutations": [
+    {
+      "schemaVersion": 1,
+      "clientMutationId": "2b81a3ec-f046-43ef-a7c1-80e76fd8da51",
+      "occurredAt": "2026-07-16T10:00:00.000Z",
+      "identity": {
+        "anonymousId": "acb79ad1-5a57-49bf-a728-02e45365231c",
+        "sessionId": "952339a6-b7ba-46bc-a7cb-0471fa39356f"
+      },
+      "type": "identify",
+      "externalUserId": "customer_1842",
+      "attributes": {
+        "plan": "enterprise",
+        "country": "TR",
+        "subscribed": true
+      },
+      "metadata": {
+        "platform": "web",
+        "sdkVersion": "0.2.0-alpha.1",
+        "locale": "tr-TR"
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "clientMutationId": "c8c3c6cf-08f8-4fa6-975b-b9ef0a816f10",
+      "occurredAt": "2026-07-16T10:00:01.000Z",
+      "identity": {
+        "anonymousId": "acb79ad1-5a57-49bf-a728-02e45365231c",
+        "sessionId": "952339a6-b7ba-46bc-a7cb-0471fa39356f"
+      },
+      "type": "update_user",
+      "operations": {
+        "set": { "plan": "business" },
+        "setOnce": { "signup_channel": "partner" },
+        "increment": { "lifetime_orders": 1 }
+      },
+      "metadata": {
+        "platform": "web",
+        "sdkVersion": "0.2.0-alpha.1",
+        "locale": "tr-TR"
+      }
+    }
+  ]
+}

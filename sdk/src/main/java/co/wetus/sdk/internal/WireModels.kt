@@ -2,6 +2,7 @@ package co.wetus.sdk.internal
 
 import android.content.Context
 import co.wetus.sdk.WtsRevenue
+import co.wetus.sdk.WtsReportedAttribution
 import co.wetus.sdk.WtsSdk
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -32,7 +33,7 @@ internal data class Metadata(
 
 @Serializable
 internal data class ResolveRequest(
-    val schemaVersion: Int = 1,
+    val schemaVersion: Int = 2,
     val clientEventId: String = UUID.randomUUID().toString(),
     val installId: String,
     val occurredAt: String = isoTimestamp(),
@@ -42,7 +43,7 @@ internal data class ResolveRequest(
 
 @Serializable
 internal data class DeferredRequest(
-    val schemaVersion: Int = 1,
+    val schemaVersion: Int = 2,
     val clientEventId: String = UUID.randomUUID().toString(),
     val installId: String,
     val occurredAt: String = isoTimestamp(),
@@ -62,7 +63,7 @@ internal data class ResolveResponse(
 
 @Serializable
 internal data class EventRequest(
-    val schemaVersion: Int = 1,
+    val schemaVersion: Int = 2,
     val clientEventId: String = UUID.randomUUID().toString(),
     val installId: String,
     val occurredAt: String = isoTimestamp(),
@@ -78,7 +79,7 @@ internal data class RevenueWire(val amount: String, val currency: String) {
     companion object { fun from(value: WtsRevenue) = RevenueWire(value.amount, value.normalizedCurrency) }
 }
 
-@Serializable internal data class EventBatch(val schemaVersion: Int = 1, val events: List<EventRequest>)
+@Serializable internal data class EventBatch(val schemaVersion: Int = 2, val events: List<EventRequest>)
 
 @Serializable
 internal data class EventBatchResponse(
@@ -94,6 +95,72 @@ internal data class EventBatchResponse(
         val retryable: Boolean,
     )
 }
+
+@Serializable
+internal data class IdentityContext(
+    val installId: String,
+    val sessionId: String? = null,
+)
+
+@Serializable
+internal data class UserUpdateWire(
+    val set: JsonObject? = null,
+    val setOnce: JsonObject? = null,
+    val unset: List<String>? = null,
+    val increment: Map<String, Double>? = null,
+)
+
+@Serializable
+internal data class ReportedAttributionWire(
+    val source: String,
+    val medium: String? = null,
+    val campaign: String? = null,
+    val externalRef: String? = null,
+) {
+    companion object {
+        fun from(value: WtsReportedAttribution) = ReportedAttributionWire(
+            source = value.source,
+            medium = value.medium,
+            campaign = value.campaign,
+            externalRef = value.externalRef,
+        )
+    }
+}
+
+@Serializable
+internal data class IdentityMutationRequest(
+    val schemaVersion: Int = 1,
+    val clientMutationId: String = UUID.randomUUID().toString(),
+    val occurredAt: String = isoTimestamp(),
+    val identity: IdentityContext,
+    val type: String,
+    val externalUserId: String? = null,
+    val attributes: JsonObject? = null,
+    val operations: UserUpdateWire? = null,
+    val attribution: ReportedAttributionWire? = null,
+    val metadata: Metadata,
+)
+
+@Serializable
+internal data class IdentityMutationBatch(
+    val schemaVersion: Int = 1,
+    val mutations: List<IdentityMutationRequest>,
+)
+
+@Serializable
+internal data class IdentityMutationBatchResponse(
+    val accepted: List<String>,
+    val duplicates: List<String>,
+    val rejected: List<RejectedIdentityMutation> = emptyList(),
+)
+
+@Serializable
+internal data class RejectedIdentityMutation(
+    val clientMutationId: String,
+    val code: String,
+    val message: String,
+    val retryable: Boolean,
+)
 
 private fun isoTimestamp(): String = SimpleDateFormat(
     "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'",
