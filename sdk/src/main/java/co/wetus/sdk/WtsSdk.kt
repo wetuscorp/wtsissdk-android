@@ -140,10 +140,14 @@ class WtsSdk internal constructor(
     }
 
     fun setProfileConsent(consent: WtsProfileConsent) {
-        profileConsentGranted = consent == WtsProfileConsent.GRANTED
-        if (!profileConsentGranted && !identityStore.save(emptyList())) {
-            throw WtsSdkException.Storage
+        if (consent == WtsProfileConsent.GRANTED) {
+            profileConsentGranted = true
+            return
         }
+        profileConsentGranted = false
+        if (!identityStore.save(emptyList())) throw WtsSdkException.Storage
+        enqueueIdentity(type = "reset_identity")
+        identitySessionId = UUID.randomUUID().toString().lowercase()
     }
 
     suspend fun identify(
@@ -151,8 +155,7 @@ class WtsSdk internal constructor(
         attributes: Map<String, WtsUserValue> = emptyMap(),
     ) {
         requireProfileConsent()
-        val normalized = externalUserId.trim()
-        if (normalized.isEmpty() || normalized.length > 128) {
+        if (externalUserId.isEmpty() || externalUserId.length > 128) {
             throw WtsSdkException.InvalidProfile(
                 "externalUserId must contain 1 to 128 characters.",
             )
@@ -160,7 +163,7 @@ class WtsSdk internal constructor(
         validateAttributes(attributes)
         enqueueIdentity(
             type = "identify",
-            externalUserId = normalized,
+            externalUserId = externalUserId,
             attributes = attributes.takeIf { it.isNotEmpty() }?.toUserJson(),
         )
     }
@@ -218,9 +221,14 @@ class WtsSdk internal constructor(
             )
             val terminal = (response.accepted + response.duplicates +
                 response.rejected.filterNot { it.retryable }.map { it.clientEventId }).toSet()
-            if (!store.save(queued.filterNot { it.clientEventId in terminal })) throw WtsSdkException.Storage
-            retryAttempt = 0
-            if (queued.size > batch.size) scheduleFlush(0)
+            val remaining = queued.filterNot { it.clientEventId in terminal }
+            if (!store.save(remaining)) throw WtsSdkException.Storage
+            if (response.rejected.any { it.retryable }) {
+                scheduleRetry()
+            } else {
+                retryAttempt = 0
+                if (remaining.isNotEmpty()) scheduleFlush(0)
+            }
         } catch (error: WtsSdkException.Server) {
             if (error.statusCode in 400..499 && error.statusCode != 429) {
                 store.save(queued.drop(batch.size))
@@ -251,9 +259,11 @@ class WtsSdk internal constructor(
                     response.duplicates +
                     response.rejected.filterNot { it.retryable }.map { it.clientMutationId }
                 ).toSet()
-            if (!identityStore.save(queued.filterNot { it.clientMutationId in terminal })) {
+            val remaining = queued.filterNot { it.clientMutationId in terminal }
+            if (!identityStore.save(remaining)) {
                 throw WtsSdkException.Storage
             }
+            if (response.rejected.any { it.retryable }) throw RetryableBatchRejection()
         } catch (error: WtsSdkException.Server) {
             if (error.statusCode in 400..499 && error.statusCode != 429) {
                 identityStore.save(queued.drop(batch.size))
@@ -327,28 +337,30 @@ class WtsSdk internal constructor(
         is WtsUserValue.StringArrayValue -> JsonArray(value.map(::JsonPrimitive))
     }
 
-    private suspend fun enqueueIdentity(
+    private fun enqueueIdentity(
         type: String,
         externalUserId: String? = null,
         attributes: JsonObject? = null,
         operations: UserUpdateWire? = null,
         attribution: ReportedAttributionWire? = null,
     ) {
+        val mutation = IdentityMutationRequest(
+            identity = IdentityContext(
+                installId = installId,
+                sessionId = identitySessionId,
+            ),
+            type = type,
+            externalUserId = externalUserId,
+            attributes = attributes,
+            operations = operations,
+            attribution = attribution,
+            metadata = Metadata.current(appContext),
+        )
+        if (encodedIdentityBatchSize(listOf(mutation)) > 65_536) {
+            throw WtsSdkException.InvalidProfile("Identity mutation cannot exceed 64 KiB.")
+        }
         val queue = identityStore.load().toMutableList().apply {
-            add(
-                IdentityMutationRequest(
-                    identity = IdentityContext(
-                        installId = installId,
-                        sessionId = identitySessionId,
-                    ),
-                    type = type,
-                    externalUserId = externalUserId,
-                    attributes = attributes,
-                    operations = operations,
-                    attribution = attribution,
-                    metadata = Metadata.current(appContext),
-                ),
-            )
+            add(mutation)
             while (size > 100 || encodedIdentityBatchSize(this) > 1_048_576) removeAt(0)
         }
         if (!identityStore.save(queue)) throw WtsSdkException.Storage
@@ -496,3 +508,5 @@ class WtsSdk internal constructor(
         fun shared(): WtsSdk = instance ?: throw WtsSdkException.NotConfigured
     }
 }
+
+private class RetryableBatchRejection : Exception()

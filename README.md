@@ -63,7 +63,7 @@ The private SharedPreferences queue is atomic, FIFO and bounded to 100 events/1 
 
 ## User identity and reported attribution
 
-Profile operations require an explicit consent decision from the host application. Use your own stable, opaque customer ID rather than an email address as `externalUserId`.
+Profile operations require an explicit consent decision from the host application. Use your own stable, opaque customer ID rather than an email address as `externalUserId`; the value is case-sensitive and is not trimmed or normalized.
 
 ```kotlin
 WtsSdk.shared().setProfileConsent(WtsProfileConsent.GRANTED)
@@ -97,6 +97,6 @@ lifecycleScope.launch {
 }
 ```
 
-Call `resetIdentity()` on logout. It removes the current profile binding, rotates the anonymous/session context and preserves the installation identity used by Install Referrer. Identity mutations are durable, idempotent and flushed before queued events.
+Call `resetIdentity()` on logout. It removes the current profile binding, rotates the anonymous/session context and preserves the installation identity used by Install Referrer. Setting profile consent to `DENIED` also queues a binding reset while anonymous analytics remains available. Identity mutations are durable, idempotent and flushed before queued events.
 
-See the installable `sample` app, [security policy](SECURITY.md), and [support policy](SUPPORT.md). Full integration documentation: https://wts.is/docs/sdk/android
+See the installable `sample` app, [security policy](SECURITY.md), and [support policy](SUPPORT.md). Full integration documentation: https://wts.is/en/resources/docs/sdk-android

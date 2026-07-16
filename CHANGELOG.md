@@ -6,6 +6,9 @@
 - Added consent-gated Identity V1 operations: `identify`, `updateUser`, `setReportedAttribution`, and `resetIdentity`.
 - Added persistent, idempotent identity mutations that flush before queued events.
 - Preserved the installation UUID across logout while rotating profile and session identity.
+- Reset the server-side profile binding when profile consent is denied.
+- Preserved opaque external user IDs and retried retryable batch rejections.
+- Added stable public error codes for native and cross-platform callers.
 
 ## 0.1.0-alpha.1
 

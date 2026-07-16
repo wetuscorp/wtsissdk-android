@@ -117,8 +117,50 @@ class WtsSdkTest {
         )
     }
 
+    @Test
+    fun opaqueExternalUserIdIsPreservedAndConsentDenialQueuesReset() = runTest {
+        val identityStore = MemoryIdentityMutationStore()
+        val sdk = createSdk(identityStore = identityStore)
+        sdk.setProfileConsent(WtsProfileConsent.GRANTED)
+        sdk.identify(" customer_1842 ")
+
+        assertEquals(" customer_1842 ", identityStore.load().first().externalUserId)
+
+        sdk.setProfileConsent(WtsProfileConsent.DENIED)
+        assertEquals(1, identityStore.load().size)
+        assertEquals("reset_identity", identityStore.load().first().type)
+    }
+
+    @Test
+    fun oversizedIdentityMutationIsRejectedBeforePersistence() = runTest {
+        val identityStore = MemoryIdentityMutationStore()
+        val sdk = createSdk(identityStore = identityStore)
+        sdk.setProfileConsent(WtsProfileConsent.GRANTED)
+        val attributes = (0 until 50).associate {
+            "attribute_$it" to WtsUserValue.of("x".repeat(2_048))
+        }
+
+        assertFailsWith<WtsSdkException.InvalidProfile> {
+            sdk.identify("customer_1842", attributes)
+        }
+        assertTrue(identityStore.load().isEmpty())
+    }
+
+    @Test
+    fun errorsExposeStableCodesAndFallbackUris() {
+        val fallbackUri = Uri.parse("https://wts.is/fallback")
+
+        assertEquals("TIMEOUT", WtsSdkException.Timeout(fallbackUri).code)
+        assertEquals(fallbackUri, WtsSdkException.Timeout(fallbackUri).fallbackUri)
+        assertEquals(
+            "PROFILE_CONSENT_REQUIRED",
+            WtsSdkException.ProfileConsentRequired.code,
+        )
+    }
+
     private fun createSdk(
         store: EventStore = MemoryEventStore(),
+        identityStore: IdentityMutationStore = MemoryIdentityMutationStore(),
         referrer: ReferrerSource = ReferrerSource { null },
     ) = WtsSdk(
         context = context,
@@ -126,7 +168,7 @@ class WtsSdkTest {
         options = WtsOptions(apiBaseUrl = server.url("/").toString()),
         client = OkHttpClient(),
         store = store,
-        identityStore = MemoryIdentityMutationStore(),
+        identityStore = identityStore,
         referrerSource = referrer,
     )
 
