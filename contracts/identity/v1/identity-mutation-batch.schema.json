@@ -1,0 +1,144 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wts.is/schemas/sdk/identity/v1/identity-mutation-batch.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "mutations"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "mutations": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 50,
+      "items": { "$ref": "#/$defs/mutation" }
+    }
+  },
+  "$defs": {
+    "attributeKey": { "type": "string", "pattern": "^[a-z][a-z0-9_]{0,63}$" },
+    "attributeValue": {
+      "oneOf": [
+        { "type": "string", "maxLength": 2048 },
+        { "type": "number" },
+        { "type": "boolean" },
+        {
+          "type": "array",
+          "maxItems": 50,
+          "items": { "type": "string", "maxLength": 512 }
+        }
+      ]
+    },
+    "attributes": {
+      "type": "object",
+      "maxProperties": 50,
+      "propertyNames": { "$ref": "#/$defs/attributeKey" },
+      "additionalProperties": { "$ref": "#/$defs/attributeValue" }
+    },
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "anonymousId": { "type": "string", "format": "uuid" },
+        "installId": { "type": "string", "minLength": 8, "maxLength": 128 },
+        "sessionId": { "type": "string", "format": "uuid" }
+      },
+      "oneOf": [
+        { "required": ["anonymousId"], "not": { "required": ["installId"] } },
+        { "required": ["installId"], "not": { "required": ["anonymousId"] } }
+      ]
+    },
+    "operations": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "set": { "$ref": "#/$defs/attributes" },
+        "setOnce": { "$ref": "#/$defs/attributes" },
+        "unset": {
+          "type": "array",
+          "maxItems": 50,
+          "items": { "$ref": "#/$defs/attributeKey" }
+        },
+        "increment": {
+          "type": "object",
+          "maxProperties": 50,
+          "propertyNames": { "$ref": "#/$defs/attributeKey" },
+          "additionalProperties": { "type": "number" }
+        }
+      },
+      "minProperties": 1
+    },
+    "attribution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source"],
+      "properties": {
+        "source": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "medium": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "campaign": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "externalRef": { "type": "string", "minLength": 1, "maxLength": 256 }
+      }
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["platform", "sdkVersion"],
+      "properties": {
+        "platform": { "enum": ["web", "ios", "android"] },
+        "sdkVersion": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "appVersion": { "type": "string", "maxLength": 64 },
+        "osVersion": { "type": "string", "maxLength": 64 },
+        "locale": { "type": "string", "maxLength": 32 }
+      }
+    },
+    "mutation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "clientMutationId",
+        "occurredAt",
+        "identity",
+        "type",
+        "metadata"
+      ],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "clientMutationId": { "type": "string", "format": "uuid" },
+        "occurredAt": { "type": "string", "format": "date-time" },
+        "identity": { "$ref": "#/$defs/identity" },
+        "type": {
+          "enum": [
+            "identify",
+            "update_user",
+            "reported_attribution",
+            "reset_identity"
+          ]
+        },
+        "externalUserId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "attributes": { "$ref": "#/$defs/attributes" },
+        "operations": { "$ref": "#/$defs/operations" },
+        "attribution": { "$ref": "#/$defs/attribution" },
+        "metadata": { "$ref": "#/$defs/metadata" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "type": { "const": "identify" } } },
+          "then": { "required": ["externalUserId"] }
+        },
+        {
+          "if": { "properties": { "type": { "const": "update_user" } } },
+          "then": { "required": ["operations"] }
+        },
+        {
+          "if": {
+            "properties": { "type": { "const": "reported_attribution" } }
+          },
+          "then": { "required": ["attribution"] }
+        }
+      ]
+    }
+  }
+}

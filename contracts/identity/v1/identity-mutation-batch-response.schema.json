@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wts.is/schemas/sdk/identity/v1/identity-mutation-batch-response.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["accepted", "duplicates", "rejected"],
+  "properties": {
+    "accepted": {
+      "type": "array",
+      "items": { "type": "string", "format": "uuid" }
+    },
+    "duplicates": {
+      "type": "array",
+      "items": { "type": "string", "format": "uuid" }
+    },
+    "rejected": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["clientMutationId", "code", "message", "retryable"],
+        "properties": {
+          "clientMutationId": { "type": "string", "format": "uuid" },
+          "code": {
+            "enum": [
+              "PROFILE_SUPPRESSED",
+              "PROFILE_NOT_IDENTIFIED",
+              "PROFILE_ATTRIBUTE_INVALID",
+              "IDENTITY_MUTATION_INVALID"
+            ]
+          },
+          "message": { "type": "string" },
+          "retryable": { "type": "boolean" }
+        }
+      }
+    }
+  }
+}

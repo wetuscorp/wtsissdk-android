@@ -1,0 +1,12 @@
+{
+  "accepted": ["d66855b9-d32f-487f-83f0-e73b41f94c0e"],
+  "duplicates": ["c7ad3c4e-667a-4c33-9cf1-b65cf59ad8c4"],
+  "rejected": [
+    {
+      "clientEventId": "78e47189-79e4-4b73-a30f-a68a395355db",
+      "code": "EVENT_NOT_REGISTERED",
+      "message": "Event key is not registered.",
+      "retryable": false
+    }
+  ]
+}

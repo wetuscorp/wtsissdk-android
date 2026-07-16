@@ -6,7 +6,7 @@ plugins {
 }
 
 group = "co.wetus"
-version = "0.1.0-alpha.1"
+version = "0.2.0-alpha.1"
 
 android {
     namespace = "co.wetus.sdk"

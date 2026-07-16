@@ -1,0 +1,10 @@
+{
+  "match": true,
+  "attributionId": "3ecb3fa8-4b87-4b53-96c4-bde05a6f707d",
+  "isDeferred": false,
+  "link": {
+    "id": "link_example",
+    "path": "/products/123",
+    "parameters": { "campaign": "summer", "featured": true }
+  }
+}

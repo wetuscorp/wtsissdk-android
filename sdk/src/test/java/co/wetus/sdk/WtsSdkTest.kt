@@ -6,6 +6,8 @@ import androidx.test.core.app.ApplicationProvider
 import co.wetus.sdk.internal.EventRequest
 import co.wetus.sdk.internal.EventStore
 import co.wetus.sdk.internal.EventBatchResponse
+import co.wetus.sdk.internal.IdentityMutationRequest
+import co.wetus.sdk.internal.IdentityMutationStore
 import co.wetus.sdk.internal.PreferencesEventStore
 import co.wetus.sdk.internal.ReferrerSource
 import kotlin.test.AfterTest
@@ -100,6 +102,21 @@ class WtsSdkTest {
         assertFalse(response.rejected.first().retryable)
     }
 
+    @Test
+    fun identityRequiresExplicitProfileConsent() = runTest {
+        val sdk = createSdk()
+
+        assertFailsWith<WtsSdkException.ProfileConsentRequired> {
+            sdk.identify("customer_1842")
+        }
+
+        sdk.setProfileConsent(WtsProfileConsent.GRANTED)
+        sdk.identify(
+            "customer_1842",
+            mapOf("plan" to WtsUserValue.StringValue("enterprise")),
+        )
+    }
+
     private fun createSdk(
         store: EventStore = MemoryEventStore(),
         referrer: ReferrerSource = ReferrerSource { null },
@@ -109,6 +126,7 @@ class WtsSdkTest {
         options = WtsOptions(apiBaseUrl = server.url("/").toString()),
         client = OkHttpClient(),
         store = store,
+        identityStore = MemoryIdentityMutationStore(),
         referrerSource = referrer,
     )
 
@@ -118,7 +136,16 @@ class WtsSdkTest {
         override fun save(events: List<EventRequest>): Boolean { this.events = events; return true }
     }
 
+    private class MemoryIdentityMutationStore : IdentityMutationStore {
+        private var mutations = emptyList<IdentityMutationRequest>()
+        override fun load() = mutations
+        override fun save(mutations: List<IdentityMutationRequest>): Boolean {
+            this.mutations = mutations
+            return true
+        }
+    }
+
     private fun fixture(name: String): String = requireNotNull(
-        javaClass.classLoader?.getResource("v1/fixtures/$name"),
+        javaClass.classLoader?.getResource("mobile/v2/fixtures/$name"),
     ).readText()
 }

@@ -14,6 +14,38 @@ sealed interface WtsValue {
     }
 }
 
+sealed interface WtsUserValue {
+    data class StringValue(val value: String) : WtsUserValue
+    data class NumberValue(val value: Double) : WtsUserValue
+    data class BooleanValue(val value: Boolean) : WtsUserValue
+    data class DateValue(val value: String) : WtsUserValue
+    data class StringArrayValue(val value: List<String>) : WtsUserValue
+
+    companion object {
+        fun of(value: String): WtsUserValue = StringValue(value)
+        fun of(value: Number): WtsUserValue = NumberValue(value.toDouble())
+        fun of(value: Boolean): WtsUserValue = BooleanValue(value)
+        fun date(value: String): WtsUserValue = DateValue(value)
+        fun strings(value: List<String>): WtsUserValue = StringArrayValue(value)
+    }
+}
+
+data class WtsUserUpdate(
+    val set: Map<String, WtsUserValue> = emptyMap(),
+    val setOnce: Map<String, WtsUserValue> = emptyMap(),
+    val unset: List<String> = emptyList(),
+    val increment: Map<String, Double> = emptyMap(),
+)
+
+data class WtsReportedAttribution(
+    val source: String,
+    val medium: String? = null,
+    val campaign: String? = null,
+    val externalRef: String? = null,
+)
+
+enum class WtsProfileConsent { GRANTED, DENIED }
+
 data class WtsDeepLink(
     val path: String,
     val parameters: Map<String, WtsValue>,
@@ -55,5 +87,8 @@ sealed class WtsSdkException(message: String, cause: Throwable? = null) : Except
     data class Server(val statusCode: Int, override val fallbackUri: Uri? = null) : WtsSdkException("The wts.is API returned HTTP $statusCode.")
     data class InvalidResponse(override val fallbackUri: Uri? = null) : WtsSdkException("The wts.is API response was invalid.")
     data class InvalidEvent(val reason: String) : WtsSdkException(reason)
+    data class InvalidProfile(val reason: String) : WtsSdkException(reason)
+    data object ProfileConsentRequired :
+        WtsSdkException("Profile consent must be granted before using identity APIs.")
     data object Storage : WtsSdkException("The wts.is local event queue could not be persisted.")
 }

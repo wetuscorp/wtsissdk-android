@@ -8,6 +8,11 @@ internal interface EventStore {
     fun save(events: List<EventRequest>): Boolean
 }
 
+internal interface IdentityMutationStore {
+    fun load(): List<IdentityMutationRequest>
+    fun save(mutations: List<IdentityMutationRequest>): Boolean
+}
+
 internal class PreferencesEventStore(
     private val preferences: SharedPreferences,
     private val json: Json,
@@ -30,4 +35,36 @@ internal class PreferencesEventStore(
     }
 
     private companion object { const val KEY = "event-queue-v1" }
+}
+
+internal class PreferencesIdentityMutationStore(
+    private val preferences: SharedPreferences,
+    private val json: Json,
+) : IdentityMutationStore {
+    override fun load(): List<IdentityMutationRequest> {
+        val raw = preferences.getString(KEY, null) ?: return emptyList()
+        return runCatching {
+            json.decodeFromString(IdentityMutationBatch.serializer(), raw).mutations
+        }.getOrElse {
+            preferences.edit().remove(KEY).commit()
+            emptyList()
+        }
+    }
+
+    override fun save(mutations: List<IdentityMutationRequest>): Boolean =
+        if (mutations.isEmpty()) {
+            preferences.edit().remove(KEY).commit()
+        } else {
+            preferences.edit()
+                .putString(
+                    KEY,
+                    json.encodeToString(
+                        IdentityMutationBatch.serializer(),
+                        IdentityMutationBatch(mutations = mutations),
+                    ),
+                )
+                .commit()
+        }
+
+    private companion object { const val KEY = "identity-queue-v1" }
 }

@@ -1,6 +1,10 @@
 {
-  "protocolVersion": 1,
+  "protocolVersion": 2,
   "canonicalRepository": "https://github.com/wetuscorp/wts.is",
-  "canonicalRef": "protocol-v1",
-  "fixtureChecksum": "49d95628b5c25b5058242bc78b8283145730b6b811131f96aadd798c58eeb8c3"
+  "canonicalRef": "mobile-protocol-v2-identity-v1",
+  "contractPath": "sdks/contracts/mobile/v2",
+  "fixtureChecksum": "3329d0843018f7fdb0cfcffc38a725a4bb340c9eed96d96df5fffe02ac27c1a0",
+  "identityProtocolVersion": 1,
+  "identityContractPath": "sdks/contracts/identity/v1",
+  "identityFixtureChecksum": "68a684ce22819418c9bee2b5330fffa6f3d284722b204eead8af0cbf28c6381a"
 }
