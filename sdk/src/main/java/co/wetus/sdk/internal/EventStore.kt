@@ -13,6 +13,11 @@ internal interface IdentityMutationStore {
     fun save(mutations: List<IdentityMutationRequest>): Boolean
 }
 
+internal interface ExperienceInteractionStore {
+    fun load(): List<ExperienceInteractionRequest>
+    fun save(interactions: List<ExperienceInteractionRequest>): Boolean
+}
+
 internal class PreferencesEventStore(
     private val preferences: SharedPreferences,
     private val json: Json,
@@ -67,4 +72,41 @@ internal class PreferencesIdentityMutationStore(
         }
 
     private companion object { const val KEY = "identity-queue-v1" }
+}
+
+internal class PreferencesExperienceInteractionStore(
+    private val preferences: SharedPreferences,
+    private val json: Json,
+) : ExperienceInteractionStore {
+    override fun load(): List<ExperienceInteractionRequest> {
+        val raw = preferences.getString(KEY, null) ?: return emptyList()
+        return runCatching {
+            json.decodeFromString(
+                ExperienceInteractionQueue.serializer(),
+                raw,
+            ).interactions
+        }.getOrElse {
+            preferences.edit().remove(KEY).commit()
+            emptyList()
+        }
+    }
+
+    override fun save(interactions: List<ExperienceInteractionRequest>): Boolean =
+        if (interactions.isEmpty()) {
+            preferences.edit().remove(KEY).commit()
+        } else {
+            preferences.edit()
+                .putString(
+                    KEY,
+                    json.encodeToString(
+                        ExperienceInteractionQueue.serializer(),
+                        ExperienceInteractionQueue(
+                            interactions = interactions,
+                        ),
+                    ),
+                )
+                .commit()
+        }
+
+    private companion object { const val KEY = "experience-interaction-queue-v1" }
 }

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.0-alpha.1
+
+- Added Mobile Protocol V3 built-in `screen` events.
+- Added explicitly opt-in wts.is Experiences V1 delivery.
+- Added contextual/personalized consent, native modal and bottom-sheet rendering, and manual mode.
+- Added typed safe-action allowlists and action/availability callbacks.
+- Added visibility-qualified impressions and persistent idempotent interaction retry.
+
 ## 0.2.0-alpha.1
 
 - Upgraded event delivery to Mobile Protocol V2 while preserving App Link and Install Referrer behavior.

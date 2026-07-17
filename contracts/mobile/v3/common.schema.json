@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wts.is/schemas/sdk/mobile/v3/common.json",
+  "$defs": {
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["platform"],
+      "properties": {
+        "platform": { "enum": ["ios", "android"] },
+        "appVersion": { "type": "string", "maxLength": 64 },
+        "sdkVersion": { "type": "string", "maxLength": 64 },
+        "osVersion": { "type": "string", "maxLength": 64 },
+        "locale": { "type": "string", "maxLength": 32 }
+      }
+    },
+    "scalar": {
+      "oneOf": [
+        { "type": "string", "maxLength": 512 },
+        { "type": "number" },
+        { "type": "boolean" }
+      ]
+    }
+  }
+}

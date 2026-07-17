@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 3,
+  "events": [
+    {
+      "schemaVersion": 3,
+      "clientEventId": "1a040fd8-d146-4478-acbe-36a91365b659",
+      "installId": "install-1842",
+      "sessionId": "session-1842",
+      "occurredAt": "2026-07-17T09:00:00.000Z",
+      "metadata": {
+        "platform": "android",
+        "sdkVersion": "0.3.0-alpha.1",
+        "locale": "tr-TR"
+      },
+      "type": "screen_view",
+      "screenName": "checkout",
+      "properties": {
+        "cart_total": 749.9,
+        "currency": "TRY",
+        "item_count": 3
+      }
+    }
+  ]
+}

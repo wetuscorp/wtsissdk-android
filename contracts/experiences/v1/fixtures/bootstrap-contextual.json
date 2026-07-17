@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "consent": "contextual",
+  "profileConsentGranted": false,
+  "actorId": "anonymous-1842",
+  "sessionId": "session-1842",
+  "metadata": {
+    "platform": "web",
+    "sdkVersion": "0.3.0-alpha.1",
+    "locale": "tr-TR"
+  },
+  "settings": {
+    "allowedInternalRoutes": ["/checkout/success"],
+    "allowedCallbackKeys": ["coupon.applied"],
+    "allowedDeepLinkHosts": [],
+    "allowedDeepLinkSchemes": [],
+    "allowedWebOrigins": ["https://example.com"]
+  }
+}

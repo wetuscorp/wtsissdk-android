@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wts.is/schemas/experiences/v1/decision-response.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["decisions", "serverTime"],
+  "properties": {
+    "decisions": { "type": "array", "items": { "type": "object" } },
+    "serverTime": { "type": "string", "format": "date-time" }
+  }
+}

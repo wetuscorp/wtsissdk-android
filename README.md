@@ -2,13 +2,13 @@
 
 Official SDK for verified Android App Links, deterministic Play Install Referrer deferred deep links, and offline custom event/revenue delivery. It returns validated route data; navigation remains under application control.
 
-> `0.2.0-alpha.1` · Mobile Protocol V2 + Identity V1 · minSdk 23 · compileSdk 36 · Java 17
+> `0.3.0-alpha.1` · Mobile Protocol V3 + Identity V1 + Experiences V1 · minSdk 23 · compileSdk 36 · Java 17
 
 ## Install
 
 ```kotlin
 dependencies {
-    implementation("co.wetus:wts-sdk:0.2.0-alpha.1")
+    implementation("co.wetus:wts-sdk:0.3.0-alpha.1")
 }
 ```
 
@@ -60,6 +60,59 @@ WtsSdk.shared().flush() // optional
 ```
 
 The private SharedPreferences queue is atomic, FIFO and bounded to 100 events/1 MiB. Batches are capped at 50 events/64 KiB and use exponential retry with jitter. Install identity remains in private SharedPreferences.
+
+## Screens and Experiences
+
+Screen views are built-in Mobile Protocol V3 events and do not require a
+custom-event definition:
+
+```kotlin
+WtsSdk.shared().screen(
+    name = "checkout",
+    properties = mapOf(
+        "cart_total" to WtsValue.of(749.90),
+        "currency" to WtsValue.of("TRY"),
+        "item_count" to WtsValue.of(3.0),
+    ),
+)
+```
+
+Experiences remains disabled until the host opts in and supplies a separate
+consent decision:
+
+```kotlin
+WtsSdk.configure(
+    this,
+    "YOUR_PUBLIC_APP_KEY",
+    WtsOptions(
+        experiences = WtsExperienceOptions(
+            enabled = true,
+            renderMode = WtsExperienceRenderMode.AUTOMATIC,
+            allowedInternalRoutes = setOf("/checkout", "/account"),
+            allowedCallbackKeys = setOf("apply_offer"),
+            allowedDeepLinkHosts = setOf("go.example.com"),
+            allowedDeepLinkSchemes = setOf("example"),
+            allowedWebOrigins = setOf("https://www.example.com"),
+        ),
+    ),
+)
+
+WtsSdk.shared().setExperienceConsent(WtsExperienceConsent.CONTEXTUAL)
+```
+
+Use `PERSONALIZED` only after profile consent. `PENDING` makes no Experience
+request; `DENIED` clears local Experience state and unsent interactions.
+Automatic mode uses native modal or bottom-sheet presentation. Manual mode
+notifies `onExperienceAvailable` and waits for
+`presentNextExperience()`. Interactions use a private persistent bounded queue,
+UUID idempotency and retry. Impressions require one uninterrupted second of
+native visibility.
+
+For an unpublished device test, copy
+`WtsSdk.shared().getExperienceDiagnostics().testDeviceToken` into the
+dashboard test panel for the same Mobile App. The random token contains no
+install, user, or profile identifier. Test traffic does not affect customer
+analytics or impression usage.
 
 ## User identity and reported attribution
 
