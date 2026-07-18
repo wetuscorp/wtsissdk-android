@@ -5,7 +5,14 @@
   "additionalProperties": false,
   "required": ["manifest", "signedPayload", "signature", "keyId", "expiresAt"],
   "properties": {
-    "manifest": { "type": "object" },
+    "manifest": {
+      "type": "object",
+      "required": ["sourceKey"],
+      "properties": {
+        "sourceKey": { "type": "string", "minLength": 1, "maxLength": 256 }
+      },
+      "additionalProperties": true
+    },
     "signedPayload": { "type": "string", "minLength": 1 },
     "signature": { "type": "string" },
     "keyId": { "type": "string" },

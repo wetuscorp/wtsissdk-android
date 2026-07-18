@@ -43,6 +43,7 @@ internal data class ExperienceBootstrapResponse(
     @Serializable
     data class Manifest(
         val sourceId: String,
+        val sourceKey: String,
         val sourceManifestVersion: Int,
         val environment: String = "production",
         val expiresAt: String,

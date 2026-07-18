@@ -16,6 +16,7 @@ internal object ExperienceManifestVerifier {
     fun verify(
         response: ExperienceBootstrapResponse,
         verificationKeys: Map<String, String>,
+        expectedSourceKey: String,
         json: Json,
     ): ExperienceBootstrapResponse.Manifest? {
         val encodedPublicKey = verificationKeys[response.keyId] ?: return null
@@ -29,6 +30,7 @@ internal object ExperienceManifestVerifier {
             }
             if (!verifier.verify(signature)) return null
             json.decodeFromString(ExperienceBootstrapResponse.Manifest.serializer(), payload.decodeToString())
+                .takeIf { it.sourceKey == expectedSourceKey }
         }.getOrNull()
     }
 

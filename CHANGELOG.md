@@ -1,9 +1,5 @@
 # Changelog
 
-> Entries for the `0.4.0-alpha.1` source line below are not a Maven Central
-> publication claim. Consume SDK Test & Validate only from its matching
-> published Android package release.
-
 ## 0.4.0-alpha.1
 
 - Verified Experiences bootstrap manifests with keyed Ed25519 signatures over
@@ -11,6 +7,9 @@
   never used at runtime.
 - Added fail-closed verification outcomes for missing/unknown keys, invalid
   signatures, and expired signed manifests.
+- Bound every verified signed manifest to the configured source key, blocked
+  unsafe/insecure Experience deep-link schemes, and gated personalized
+  decisions on a server-accepted `identify` binding.
 - Made manual Experience delivery handle-based with idempotent render,
   impression, action, and dismissal reporting.
 - Kept exposure identifiers out of the renderable `WtsExperience` model and

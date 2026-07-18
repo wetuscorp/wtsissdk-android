@@ -196,12 +196,95 @@ class WtsSdkTest {
     }
 
     @Test
+    fun personalizedExperienceUsesContextualFallbackUntilIdentityIsBound() = runTest {
+        val fixture = signedContextualExperienceFixture()
+        val bootstrapBodies = Collections.synchronizedList(mutableListOf<String>())
+        val decideRequests = AtomicInteger()
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse = when (request.path) {
+                "/experiences/v1/bootstrap" -> {
+                    bootstrapBodies += request.body.readUtf8()
+                    MockResponse().setResponseCode(200).setBody(fixture.response)
+                }
+                "/experiences/v1/interactions/batch" ->
+                    acceptedExperienceInteractions(request.body.readUtf8())
+                "/api/v1/sdk/v3/events/batch" -> acceptedEvents(request.body.readUtf8())
+                "/experiences/v1/decide" -> {
+                    decideRequests.incrementAndGet()
+                    MockResponse().setResponseCode(500)
+                }
+                else -> MockResponse().setResponseCode(404)
+            }
+        }
+        var available: WtsExperienceManualPresentation? = null
+        val sdk = createExperienceSdk(fixture)
+        sdk.onExperienceAvailable { available = it }
+        sdk.setProfileConsent(WtsProfileConsent.GRANTED)
+
+        assertEquals(
+            WtsExperienceResult.ACCEPTED,
+            sdk.setExperienceConsent(WtsExperienceConsent.PERSONALIZED),
+        )
+        sdk.screen("checkout")
+
+        assertTrue(bootstrapBodies.single().contains("\"consent\":\"contextual\""))
+        assertEquals(0, decideRequests.get())
+        assertEquals("campaign_checkout", available?.experience?.campaignId)
+    }
+
+    @Test
+    fun personalizedExperienceDecidesAfterAcceptedIdentityBinding() = runTest {
+        val fixture = signedContextualExperienceFixture()
+        val decideBodies = Collections.synchronizedList(mutableListOf<String>())
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse = when (request.path) {
+                "/experiences/v1/bootstrap" -> MockResponse()
+                    .setResponseCode(200)
+                    .setBody(fixture.response)
+                "/api/v1/sdk/v2/identity/mutations" -> {
+                    val mutationIds = Json.parseToJsonElement(request.body.readUtf8())
+                        .jsonObject["mutations"]
+                        ?.jsonArray
+                        ?.mapNotNull { it.jsonObject["clientMutationId"]?.jsonPrimitive?.content }
+                        .orEmpty()
+                    MockResponse()
+                        .setResponseCode(202)
+                        .setBody(
+                            """{"accepted":[${mutationIds.joinToString(",") { "\"$it\"" }}],"duplicates":[],"rejected":[]}""",
+                        )
+                }
+                "/experiences/v1/decide" -> {
+                    decideBodies += request.body.readUtf8()
+                    MockResponse().setResponseCode(200).setBody("""{"decisions":[]}""")
+                }
+                "/experiences/v1/interactions/batch" ->
+                    acceptedExperienceInteractions(request.body.readUtf8())
+                "/api/v1/sdk/v3/events/batch" -> acceptedEvents(request.body.readUtf8())
+                else -> MockResponse().setResponseCode(404)
+            }
+        }
+        val sdk = createExperienceSdk(fixture)
+        sdk.setProfileConsent(WtsProfileConsent.GRANTED)
+        assertEquals(
+            WtsExperienceResult.ACCEPTED,
+            sdk.setExperienceConsent(WtsExperienceConsent.PERSONALIZED),
+        )
+        sdk.identify("customer_1842")
+        sdk.flush()
+        sdk.screen("checkout")
+
+        assertEquals(1, decideBodies.size)
+        assertTrue(decideBodies.single().contains("\"consent\":\"personalized\""))
+    }
+
+    @Test
     fun experienceManifestFailsClosedForMissingKeyInvalidSignatureUnknownKeyAndExpiry() = runTest {
         val validFixture = signedContextualExperienceFixture()
         val invalidSignatureFixture = signedContextualExperienceFixture(signatureTampered = true)
         val expiredFixture = signedContextualExperienceFixture(
             expiresAt = "2000-01-01T00:00:00.000Z",
         )
+        val wrongSourceFixture = signedContextualExperienceFixture(sourceKey = "other-public-app-key")
 
         listOf(
             validFixture to emptyMap(),
@@ -210,6 +293,7 @@ class WtsSdkTest {
                 "unknown-kid" to validFixture.verificationKeys.getValue("experience-key-v1"),
             ),
             expiredFixture to expiredFixture.verificationKeys,
+            wrongSourceFixture to wrongSourceFixture.verificationKeys,
         ).forEach { (fixture, keys) ->
             server.dispatcher = object : Dispatcher() {
                 override fun dispatch(request: RecordedRequest): MockResponse = when (request.path) {
@@ -308,6 +392,43 @@ class WtsSdkTest {
             sdk.reportExperienceAction(presentation.handle, "continue").code,
         )
         assertEquals("EXPERIENCE_ACTION_NOT_ALLOWED", sdk.getExperienceDiagnostics().lastErrorCode)
+    }
+
+    @Test
+    fun unsafeDeepLinkSchemesCannotBypassExplicitAllowlist() = runTest {
+        listOf(
+            "about",
+            "blob",
+            "data",
+            "file",
+            "filesystem",
+            "http",
+            "javascript",
+            "vbscript",
+        ).forEach { scheme ->
+            val fixture = signedContextualExperienceFixture(
+                deepLinkTarget = "$scheme:unsafe",
+            )
+            var available: WtsExperienceManualPresentation? = null
+            server.dispatcher = experienceDispatcher(fixture)
+            val sdk = createExperienceSdk(
+                fixture = fixture,
+                allowedDeepLinkSchemes = setOf(scheme),
+            )
+            sdk.onExperienceAvailable { available = it }
+
+            assertEquals(
+                WtsExperienceResult.ACCEPTED,
+                sdk.setExperienceConsent(WtsExperienceConsent.CONTEXTUAL),
+            )
+            sdk.screen("checkout")
+            val presentation = requireNotNull(available)
+            assertTrue(sdk.acknowledgeExperienceRender(presentation.handle).accepted)
+
+            val action = sdk.reportExperienceAction(presentation.handle, "continue")
+            assertFalse(action.accepted, "$scheme must be rejected even when allowlisted")
+            assertEquals("EXPERIENCE_ACTION_NOT_ALLOWED", action.code)
+        }
     }
 
     @Test
@@ -654,12 +775,15 @@ class WtsSdkTest {
     private fun signedContextualExperienceFixture(
         rawManifest: String = """{ "untrusted": true }""",
         keyId: String = "experience-key-v1",
+        sourceKey: String = "public-app-key",
+        deepLinkTarget: String = "https://allowed.example/checkout",
         expiresAt: String = "2099-01-01T00:00:00.000Z",
         signatureTampered: Boolean = false,
     ): SignedExperienceFixture {
         val payload = """
             {
               "sourceId": "source_mobile",
+              "sourceKey": "$sourceKey",
               "sourceManifestVersion": 7,
               "environment": "production",
               "expiresAt": "$expiresAt",
@@ -689,7 +813,7 @@ class WtsSdkTest {
                           "id": "continue",
                           "label": "Devam et",
                           "type": "OPEN_DEEP_LINK",
-                          "target": "https://allowed.example/checkout"
+                          "target": "$deepLinkTarget"
                         },
                         "secondaryAction": null
                       }

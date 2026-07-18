@@ -115,6 +115,8 @@ class WtsSdk internal constructor(
     private var retryAttempt = 0
     private var retryJob: Job? = null
     private var profileConsentGranted = false
+    private var identityBound =
+        preferences.getString(IDENTITY_BOUND_SOURCE_KEY, null) == appKey
     private var identitySessionId = UUID.randomUUID().toString().lowercase()
     private val experienceActivityTracker =
         ExperienceActivityTracker(appContext as android.app.Application)
@@ -900,6 +902,7 @@ class WtsSdk internal constructor(
             return
         }
         profileConsentGranted = false
+        setIdentityBound(false)
         if (experienceConsent == WtsExperienceConsent.PERSONALIZED) {
             experienceConsent = WtsExperienceConsent.PENDING
             clearExperienceRuntime(clearInteractionQueue = true)
@@ -956,6 +959,7 @@ class WtsSdk internal constructor(
 
     suspend fun resetIdentity() {
         requireProfileConsent()
+        setIdentityBound(false)
         enqueueIdentity(type = "reset_identity")
         identitySessionId = UUID.randomUUID().toString().lowercase()
     }
@@ -1021,6 +1025,10 @@ class WtsSdk internal constructor(
                     response.duplicates +
                     response.rejected.filterNot { it.retryable }.map { it.clientMutationId }
                 ).toSet()
+            updateIdentityBinding(
+                mutations = batch,
+                acceptedOrDuplicate = (response.accepted + response.duplicates).toSet(),
+            )
             val remaining = queued.filterNot { it.clientMutationId in terminal }
             if (!identityStore.save(remaining)) {
                 throw WtsSdkException.Storage
@@ -1039,16 +1047,47 @@ class WtsSdk internal constructor(
         }
     }
 
+    private fun effectiveExperienceConsent(): WtsExperienceConsent =
+        if (experienceConsent == WtsExperienceConsent.PERSONALIZED && !identityBound) {
+            WtsExperienceConsent.CONTEXTUAL
+        } else {
+            experienceConsent
+        }
+
+    private fun updateIdentityBinding(
+        mutations: List<IdentityMutationRequest>,
+        acceptedOrDuplicate: Set<String>,
+    ) {
+        mutations.filter { it.clientMutationId in acceptedOrDuplicate }.forEach { mutation ->
+            when (mutation.type) {
+                "identify" -> setIdentityBound(true)
+                "reset_identity" -> setIdentityBound(false)
+            }
+        }
+    }
+
+    private fun setIdentityBound(bound: Boolean) {
+        val editor = preferences.edit()
+        if (bound) {
+            editor.putString(IDENTITY_BOUND_SOURCE_KEY, appKey)
+        } else {
+            editor.remove(IDENTITY_BOUND_SOURCE_KEY)
+        }
+        if (!editor.commit()) throw WtsSdkException.Storage
+        identityBound = bound
+    }
+
     private suspend fun refreshExperienceManifest() {
         if (experienceConsent == WtsExperienceConsent.PERSONALIZED && !profileConsentGranted) {
             throw WtsSdkException.ExperienceProfileConsentRequired
         }
+        val deliveryConsent = effectiveExperienceConsent()
         val response: ExperienceBootstrapResponse = postExperience(
             path = "experiences/v1/bootstrap",
             body = json.encodeToString(
                 ExperienceBootstrapRequest.serializer(),
                 ExperienceBootstrapRequest(
-                    consent = experienceConsent.wireValue(),
+                    consent = deliveryConsent.wireValue(),
                     profileConsentGranted = profileConsentGranted,
                     actorId = installId,
                     sessionId = identitySessionId,
@@ -1062,6 +1101,7 @@ class WtsSdk internal constructor(
         val verifiedManifest = ExperienceManifestVerifier.verify(
             response = response,
             verificationKeys = options.experiences.manifestVerificationKeys,
+            expectedSourceKey = appKey,
             json = json,
         ) ?: throw WtsSdkException.InvalidResponse()
         val expiry = parseExperienceTimestamp(verifiedManifest.expiresAt)
@@ -1092,10 +1132,13 @@ class WtsSdk internal constructor(
             if (experienceManifestRefreshAt <= System.currentTimeMillis()) {
                 refreshExperienceManifest()
             }
-            val decisions = if (experienceConsent == WtsExperienceConsent.CONTEXTUAL) {
+            if (experienceConsent == WtsExperienceConsent.PERSONALIZED && !identityBound) {
+                runCatching { flushIdentity() }.onFailure { scheduleRetry() }
+            }
+            val deliveryConsent = effectiveExperienceConsent()
+            val decisions = if (deliveryConsent == WtsExperienceConsent.CONTEXTUAL) {
                 experienceManifest?.let { contextualExperienceDecisions(it, context) }.orEmpty()
             } else {
-                flushIdentity()
                 if (experienceCandidates.isEmpty()) {
                     emptyList()
                 } else {
@@ -1104,7 +1147,7 @@ class WtsSdk internal constructor(
                         body = json.encodeToString(
                             ExperienceDecisionRequest.serializer(),
                             ExperienceDecisionRequest(
-                                consent = experienceConsent.wireValue(),
+                                consent = deliveryConsent.wireValue(),
                                 profileConsentGranted = profileConsentGranted,
                                 actorId = installId,
                                 sessionId = identitySessionId,
@@ -1344,7 +1387,7 @@ class WtsSdk internal constructor(
                 body = json.encodeToString(
                     ExperienceInteractionBatchRequest.serializer(),
                     ExperienceInteractionBatchRequest(
-                        consent = experienceConsent.wireValue(),
+                        consent = effectiveExperienceConsent().wireValue(),
                         profileConsentGranted = profileConsentGranted,
                         actorId = installId,
                         sessionId = identitySessionId,
@@ -1445,10 +1488,12 @@ class WtsSdk internal constructor(
             WtsExperienceActionType.OPEN_DEEP_LINK -> {
                 val uri = target?.let(Uri::parse)
                 val scheme = uri?.scheme?.lowercase()
-                if (scheme == "https") {
+                if (scheme == null || isUnsafeExperienceScheme(scheme)) {
+                    false
+                } else if (scheme == "https") {
                     uri.host?.lowercase() in options.experiences.allowedDeepLinkHosts
                 } else {
-                    scheme != null && scheme in options.experiences.allowedDeepLinkSchemes
+                    scheme in options.experiences.allowedDeepLinkSchemes
                 }
             }
         }
@@ -1476,15 +1521,29 @@ class WtsSdk internal constructor(
             WtsExperienceActionType.OPEN_DEEP_LINK -> {
                 val uri = Uri.parse(target)
                 val scheme = uri.scheme?.lowercase()
-                val allowed = if (scheme == "https") {
+                val allowed = if (scheme == null || isUnsafeExperienceScheme(scheme)) {
+                    false
+                } else if (scheme == "https") {
                     uri.host?.lowercase() in options.experiences.allowedDeepLinkHosts
                 } else {
-                    scheme != null && scheme in options.experiences.allowedDeepLinkSchemes
+                    scheme in options.experiences.allowedDeepLinkSchemes
                 }
                 if (allowed) launchUri(uri)
             }
         }
     }
+
+    private fun isUnsafeExperienceScheme(scheme: String): Boolean =
+        scheme in setOf(
+            "about",
+            "blob",
+            "data",
+            "file",
+            "filesystem",
+            "http",
+            "javascript",
+            "vbscript",
+        )
 
     private fun launchUri(uri: Uri) {
         appContext.startActivity(
@@ -2061,7 +2120,7 @@ class WtsSdk internal constructor(
         json.encodeToString(
             ExperienceInteractionBatchRequest.serializer(),
             ExperienceInteractionBatchRequest(
-                consent = experienceConsent.wireValue(),
+                consent = effectiveExperienceConsent().wireValue(),
                 profileConsentGranted = profileConsentGranted,
                 actorId = installId,
                 sessionId = identitySessionId,
@@ -2088,6 +2147,7 @@ class WtsSdk internal constructor(
         const val VERSION = "0.4.0-alpha.1"
         private const val PREFERENCES = "co.wetus.wts-sdk"
         private const val INSTALL_ID = "install-id"
+        private const val IDENTITY_BOUND_SOURCE_KEY = "identity-bound-source-key-v1"
         private const val DEFERRED_TERMINAL = "deferred-terminal-v1"
         private const val EXPERIENCE_MANIFEST_CACHE_MS = 5 * 60_000L
         private const val EXPERIENCE_QUEUE_COOLDOWN_MILLIS = 3_000L
