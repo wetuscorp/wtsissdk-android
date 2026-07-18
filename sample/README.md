@@ -28,5 +28,5 @@ only in a test preview and then call
 `reportTestSessionExperienceInteraction(IMPRESSION)` or `ACTION` after the
 corresponding real test interaction. Call `leaveTestSession()` when done.
 
-These APIs are part of the `0.3.0-alpha.1` source line; use them only after the
+These APIs are part of the `0.4.0-alpha.1` source line; use them only after the
 matching Android package release has been published.

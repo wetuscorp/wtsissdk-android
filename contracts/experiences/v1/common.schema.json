@@ -43,7 +43,22 @@
         "allowedDeepLinkSchemes": {
           "type": "array",
           "maxItems": 20,
-          "items": { "type": "string", "pattern": "^[a-z][a-z0-9+.-]{1,31}$" }
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9+.-]{1,31}$",
+            "not": {
+              "enum": [
+                "about",
+                "blob",
+                "data",
+                "file",
+                "filesystem",
+                "http",
+                "javascript",
+                "vbscript"
+              ]
+            }
+          }
         },
         "allowedWebOrigins": {
           "type": "array",

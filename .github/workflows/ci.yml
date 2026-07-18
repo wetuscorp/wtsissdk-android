@@ -13,5 +13,5 @@ jobs:
       - uses: actions/setup-java@v5
         with: { distribution: temurin, java-version: '17' }
       - uses: gradle/actions/setup-gradle@v5
-      - run: chmod +x gradlew scripts/verify-contracts.sh && scripts/verify-contracts.sh
+      - run: chmod +x gradlew scripts/verify-contracts.sh scripts/verify-release-workflow.sh && scripts/verify-contracts.sh && scripts/verify-release-workflow.sh
       - run: ./gradlew :sdk:testDebugUnitTest :sdk:lintDebug :sample:assembleDebug :sdk:publishToMavenLocal

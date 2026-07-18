@@ -16,9 +16,33 @@ jobs:
       - name: Verify tag and contracts
         run: |
           grep -Fq "version = \"${GITHUB_REF_NAME}\"" sdk/build.gradle.kts
-          chmod +x gradlew scripts/verify-contracts.sh
+          chmod +x gradlew scripts/verify-contracts.sh scripts/verify-release-workflow.sh
           scripts/verify-contracts.sh
-      - run: ./gradlew :sdk:testDebugUnitTest :sample:assembleDebug :sdk:publishToMavenCentral
+          scripts/verify-release-workflow.sh
+      - name: Test and assemble release artifacts
+        run: ./gradlew :sdk:testDebugUnitTest :sample:assembleDebug
+      - name: Check Maven Central registry
+        id: maven_registry
+        env:
+          PACKAGE_VERSION: ${{ github.ref_name }}
+        run: |
+          artifact_url="https://repo.maven.apache.org/maven2/co/wetus/wts-sdk/${PACKAGE_VERSION}/wts-sdk-${PACKAGE_VERSION}.pom"
+          status="$(curl --silent --show-error --output /tmp/wts-sdk-pom.xml --write-out '%{http_code}' "$artifact_url")"
+          case "$status" in
+            200)
+              echo "published=true" >> "$GITHUB_OUTPUT"
+              ;;
+            404)
+              echo "published=false" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "Unexpected Maven Central response for $artifact_url: HTTP $status" >&2
+              exit 1
+              ;;
+          esac
+      - name: Publish Maven artifact
+        if: steps.maven_registry.outputs.published != 'true'
+        run: ./gradlew :sdk:publishToMavenCentral
         env:
           ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
           ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}

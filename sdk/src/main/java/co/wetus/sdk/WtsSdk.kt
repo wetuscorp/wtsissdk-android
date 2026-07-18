@@ -20,6 +20,7 @@ import co.wetus.sdk.internal.ExperienceInteractionBatchRequest
 import co.wetus.sdk.internal.ExperienceInteractionBatchResponse
 import co.wetus.sdk.internal.ExperienceInteractionRequest
 import co.wetus.sdk.internal.ExperienceInteractionStore
+import co.wetus.sdk.internal.ExperienceManifestVerifier
 import co.wetus.sdk.internal.ExperienceRenderer
 import co.wetus.sdk.internal.ExperienceRenderHandle
 import co.wetus.sdk.internal.ExperienceSettingsWire
@@ -114,6 +115,8 @@ class WtsSdk internal constructor(
     private var retryAttempt = 0
     private var retryJob: Job? = null
     private var profileConsentGranted = false
+    private var identityBound =
+        preferences.getString(IDENTITY_BOUND_SOURCE_KEY, null) == appKey
     private var identitySessionId = UUID.randomUUID().toString().lowercase()
     private val experienceActivityTracker =
         ExperienceActivityTracker(appContext as android.app.Application)
@@ -122,11 +125,13 @@ class WtsSdk internal constructor(
     private var experienceCandidates = emptyList<String>()
     private var experienceManifestExpiresAt = 0L
     private var experienceManifestRefreshAt = 0L
-    private val experienceQueue = mutableListOf<WtsExperience>()
+    private val experienceQueue = mutableListOf<RuntimeExperience>()
     private val experienceGrants = mutableMapOf<String, String>()
-    private var experienceAvailableHandler: ((WtsExperience) -> Unit)? = null
+    private val manualExperienceStates = mutableMapOf<String, ManualExperienceState>()
+    private var offeredManualExperienceId: String? = null
+    private var experienceAvailableHandler: ((WtsExperienceManualPresentation) -> Unit)? = null
     private var experienceActionHandler: ((WtsExperience, WtsExperienceAction) -> Boolean)? = null
-    private var presentingExperience: WtsExperience? = null
+    private var presentingExperience: RuntimeExperience? = null
     private var experienceDialog: ExperienceRenderHandle? = null
     private var experienceSessionImpressions = 0
     private val experienceTestDeviceToken = UUID.randomUUID().toString().lowercase()
@@ -135,6 +140,20 @@ class WtsSdk internal constructor(
     private var testSessionLastErrorCode: String? = null
     private var testSessionRetryJob: Job? = null
     private var testSessionRetryAttempt = 0
+
+    /** Keeps delivery-only identifiers out of the public Experience model. */
+    private data class RuntimeExperience(
+        val experience: WtsExperience,
+        val exposureId: String,
+    )
+
+    private data class ManualExperienceState(
+        val runtime: RuntimeExperience,
+        var renderAcknowledged: Boolean = false,
+        var impressionAcknowledged: Boolean = false,
+        val actionIds: MutableSet<String> = mutableSetOf(),
+        var terminalReason: WtsExperienceDismissReason? = null,
+    )
 
     init {
         if (testSession?.let(::isTestSessionExpired) == true) {
@@ -313,25 +332,33 @@ class WtsSdk internal constructor(
             feature = "experiences",
         )
         if (consent == WtsExperienceConsent.PENDING || consent == WtsExperienceConsent.DENIED) {
-            experienceManifest = null
-            experienceCandidates = emptyList()
-            experienceManifestExpiresAt = 0
-            experienceManifestRefreshAt = 0
-            experienceQueue.clear()
-            experienceDialog?.dismiss(notify = false)
-            experienceDialog = null
-            presentingExperience = null
-            if (!experienceInteractionStore.save(emptyList())) throw WtsSdkException.Storage
+            clearExperienceRuntime(clearInteractionQueue = true)
             return WtsExperienceResult.ACCEPTED
         }
-        refreshExperienceManifest()
+        if (options.experiences.manifestVerificationKeys.isEmpty()) {
+            clearExperienceRuntime(clearInteractionQueue = false)
+            experienceLastErrorCode = EXPERIENCE_MANIFEST_VERIFICATION_FAILED
+            return WtsExperienceResult.MANIFEST_VERIFICATION_FAILED
+        }
+        try {
+            refreshExperienceManifest()
+        } catch (_: WtsSdkException.InvalidResponse) {
+            clearExperienceRuntime(clearInteractionQueue = false)
+            experienceLastErrorCode = EXPERIENCE_MANIFEST_VERIFICATION_FAILED
+            return WtsExperienceResult.MANIFEST_VERIFICATION_FAILED
+        }
         runCatching { flushExperienceInteractions() }
             .onFailure { scheduleRetry() }
         return WtsExperienceResult.ACCEPTED
     }
 
-    fun onExperienceAvailable(handler: ((WtsExperience) -> Unit)?) {
+    /**
+     * Receives the next queued Experience only when manual rendering is active.
+     * The host must acknowledge its lifecycle with the supplied opaque handle.
+     */
+    fun onExperienceAvailable(handler: ((WtsExperienceManualPresentation) -> Unit)?) {
         experienceAvailableHandler = handler
+        notifyNextManualExperienceIfAvailable()
     }
 
     fun onExperienceAction(handler: ((WtsExperience, WtsExperienceAction) -> Boolean)?) {
@@ -339,36 +366,37 @@ class WtsSdk internal constructor(
     }
 
     fun presentNextExperience(): Boolean {
+        if (options.experiences.renderMode == WtsExperienceRenderMode.MANUAL) return false
         if (presentingExperience != null || experienceQueue.isEmpty() ||
             experienceSessionImpressions >= 2
         ) {
             return false
         }
         val activity = experienceActivityTracker.resumedActivity() ?: return false
-        val experience = experienceQueue.removeAt(0)
-        presentingExperience = experience
-        scope.launch { recordExperience(experience, "render_started") }
+        val runtime = experienceQueue.removeAt(0)
+        presentingExperience = runtime
+        scope.launch { recordExperience(runtime, "render_started") }
         val dialog = ExperienceRenderer.present(
             activity = activity,
-            experience = experience,
+            experience = runtime.experience,
             onImpression = {
                 scope.launch {
-                    if (presentingExperience?.exposureId == experience.exposureId) {
+                    if (presentingExperience?.exposureId == runtime.exposureId) {
                         experienceSessionImpressions += 1
-                        recordExperience(experience, "impression")
+                        recordExperience(runtime, "impression")
                     }
                 }
             },
             onAction = { action ->
-                scope.launch { handleExperienceAction(experience, action) }
+                scope.launch { handleExperienceAction(runtime, action) }
             },
             onDismiss = {
                 scope.launch {
-                    if (presentingExperience?.exposureId == experience.exposureId) {
+                    if (presentingExperience?.exposureId == runtime.exposureId) {
                         presentingExperience = null
                         experienceDialog = null
-                        recordExperience(experience, "dismissed")
-                        delay(3_000)
+                        recordExperience(runtime, "dismissed")
+                        delay(EXPERIENCE_QUEUE_COOLDOWN_MILLIS)
                         withContext(Dispatchers.Main) { presentNextExperience() }
                     }
                 }
@@ -376,18 +404,134 @@ class WtsSdk internal constructor(
         )
         if (dialog == null) {
             presentingExperience = null
-            scope.launch { recordExperience(experience, "render_failed", failureCode = "PRESENTER_UNAVAILABLE") }
+            scope.launch {
+                recordExperience(runtime, "render_failed", failureCode = "PRESENTER_UNAVAILABLE")
+            }
             return false
         }
         experienceDialog = dialog
-        scope.launch { recordExperience(experience, "render_succeeded") }
+        scope.launch { recordExperience(runtime, "render_succeeded") }
         return true
     }
 
     fun dismissCurrentExperience(): Boolean {
+        if (options.experiences.renderMode == WtsExperienceRenderMode.MANUAL) return false
         val dialog = experienceDialog ?: return false
         dialog.dismiss()
         return true
+    }
+
+    suspend fun acknowledgeExperienceRender(
+        handle: WtsExperiencePresentationHandle,
+    ): WtsExperienceLifecycleOutcome {
+        if (!isManualExperienceRuntimeEnabled()) {
+            return WtsExperienceLifecycleOutcome.rejected(manualRuntimeUnavailableCode())
+        }
+        val state = manualExperienceStates[handle.exposureId]
+            ?: return WtsExperienceLifecycleOutcome.rejected("EXPERIENCE_PRESENTATION_NOT_FOUND")
+        if (state.renderAcknowledged) return WtsExperienceLifecycleOutcome.accepted(idempotent = true)
+        if (state.terminalReason != null || presentingExperience != null ||
+            experienceQueue.firstOrNull()?.exposureId != handle.exposureId
+        ) {
+            return WtsExperienceLifecycleOutcome.rejected("EXPERIENCE_PRESENTATION_NOT_CURRENT")
+        }
+        experienceQueue.removeAt(0)
+        presentingExperience = state.runtime
+        offeredManualExperienceId = null
+        state.renderAcknowledged = true
+        recordExperience(state.runtime, "render_started")
+        recordExperience(state.runtime, "render_succeeded")
+        return WtsExperienceLifecycleOutcome.accepted()
+    }
+
+    suspend fun acknowledgeExperienceImpression(
+        handle: WtsExperiencePresentationHandle,
+    ): WtsExperienceLifecycleOutcome {
+        if (!isManualExperienceRuntimeEnabled()) {
+            return WtsExperienceLifecycleOutcome.rejected(manualRuntimeUnavailableCode())
+        }
+        val state = manualExperienceStates[handle.exposureId]
+            ?: return WtsExperienceLifecycleOutcome.rejected("EXPERIENCE_PRESENTATION_NOT_FOUND")
+        if (state.impressionAcknowledged) return WtsExperienceLifecycleOutcome.accepted(idempotent = true)
+        if (!state.renderAcknowledged || presentingExperience?.exposureId != handle.exposureId ||
+            state.terminalReason != null
+        ) {
+            return WtsExperienceLifecycleOutcome.rejected("EXPERIENCE_PRESENTATION_NOT_CURRENT")
+        }
+        state.impressionAcknowledged = true
+        experienceSessionImpressions += 1
+        recordExperience(state.runtime, "impression")
+        return WtsExperienceLifecycleOutcome.accepted()
+    }
+
+    suspend fun reportExperienceAction(
+        handle: WtsExperiencePresentationHandle,
+        actionId: String,
+    ): WtsExperienceLifecycleOutcome {
+        if (!isManualExperienceRuntimeEnabled()) {
+            return WtsExperienceLifecycleOutcome.rejected(manualRuntimeUnavailableCode())
+        }
+        val state = manualExperienceStates[handle.exposureId]
+            ?: return WtsExperienceLifecycleOutcome.rejected("EXPERIENCE_PRESENTATION_NOT_FOUND")
+        if (!state.renderAcknowledged || presentingExperience?.exposureId != handle.exposureId ||
+            state.terminalReason != null
+        ) {
+            return WtsExperienceLifecycleOutcome.rejected("EXPERIENCE_PRESENTATION_NOT_CURRENT")
+        }
+        if (actionId in state.actionIds) return WtsExperienceLifecycleOutcome.accepted(idempotent = true)
+        val action = state.runtime.experience.findAction(actionId)
+            ?: return WtsExperienceLifecycleOutcome.rejected("EXPERIENCE_ACTION_INVALID")
+        if (!isExperienceActionAllowed(action)) {
+            experienceLastErrorCode = "EXPERIENCE_ACTION_NOT_ALLOWED"
+            return WtsExperienceLifecycleOutcome.rejected("EXPERIENCE_ACTION_NOT_ALLOWED")
+        }
+        state.actionIds += action.id
+        recordExperience(
+            state.runtime,
+            if (state.runtime.experience.isPrimaryAction(action.id)) {
+                "primary_action"
+            } else {
+                "secondary_action"
+            },
+            actionId = action.id,
+        )
+        if (action.type.isNavigationAction()) clearQueuedExperiences()
+        return WtsExperienceLifecycleOutcome.accepted()
+    }
+
+    suspend fun dismissExperience(
+        handle: WtsExperiencePresentationHandle,
+        reason: WtsExperienceDismissReason = WtsExperienceDismissReason.DISMISSED,
+        failureCode: String? = null,
+    ): WtsExperienceLifecycleOutcome {
+        if (!isManualExperienceRuntimeEnabled()) {
+            return WtsExperienceLifecycleOutcome.rejected(manualRuntimeUnavailableCode())
+        }
+        val state = manualExperienceStates[handle.exposureId]
+            ?: return WtsExperienceLifecycleOutcome.rejected("EXPERIENCE_PRESENTATION_NOT_FOUND")
+        if (state.terminalReason == reason) return WtsExperienceLifecycleOutcome.accepted(idempotent = true)
+        if (!state.renderAcknowledged || presentingExperience?.exposureId != handle.exposureId ||
+            state.terminalReason != null
+        ) {
+            return WtsExperienceLifecycleOutcome.rejected("EXPERIENCE_PRESENTATION_NOT_CURRENT")
+        }
+        if (reason == WtsExperienceDismissReason.RENDER_FAILED && failureCode.isNullOrBlank()) {
+            return WtsExperienceLifecycleOutcome.rejected("EXPERIENCE_FAILURE_CODE_REQUIRED")
+        }
+        state.terminalReason = reason
+        presentingExperience = null
+        experienceDialog = null
+        when (reason) {
+            WtsExperienceDismissReason.DISMISSED -> recordExperience(state.runtime, "dismissed")
+            WtsExperienceDismissReason.AUTO_CLOSED -> recordExperience(state.runtime, "auto_closed")
+            WtsExperienceDismissReason.RENDER_FAILED ->
+                recordExperience(state.runtime, "render_failed", failureCode = failureCode)
+        }
+        scope.launch {
+            delay(EXPERIENCE_QUEUE_COOLDOWN_MILLIS)
+            notifyNextManualExperienceIfAvailable()
+        }
+        return WtsExperienceLifecycleOutcome.accepted()
     }
 
     fun getExperienceDiagnostics() = WtsExperienceDiagnostics(
@@ -398,6 +542,61 @@ class WtsSdk internal constructor(
         testDeviceToken = experienceTestDeviceToken,
         lastErrorCode = experienceLastErrorCode,
     )
+
+    private fun clearExperienceRuntime(clearInteractionQueue: Boolean) {
+        experienceManifest = null
+        experienceCandidates = emptyList()
+        experienceManifestExpiresAt = 0
+        experienceManifestRefreshAt = 0
+        experienceGrants.clear()
+        clearQueuedExperiences()
+        manualExperienceStates.clear()
+        offeredManualExperienceId = null
+        experienceDialog?.dismiss(notify = false)
+        experienceDialog = null
+        presentingExperience = null
+        if (clearInteractionQueue && !experienceInteractionStore.save(emptyList())) {
+            throw WtsSdkException.Storage
+        }
+    }
+
+    private fun clearQueuedExperiences() {
+        experienceQueue.forEach { manualExperienceStates.remove(it.exposureId) }
+        experienceQueue.clear()
+        offeredManualExperienceId = null
+    }
+
+    private fun isManualExperienceRuntimeEnabled(): Boolean =
+        options.experiences.enabled &&
+            options.experiences.renderMode == WtsExperienceRenderMode.MANUAL &&
+            experienceConsent in setOf(
+                WtsExperienceConsent.CONTEXTUAL,
+                WtsExperienceConsent.PERSONALIZED,
+            ) &&
+            (experienceConsent != WtsExperienceConsent.PERSONALIZED || profileConsentGranted)
+
+    private fun manualRuntimeUnavailableCode(): String = when {
+        !options.experiences.enabled -> "EXPERIENCE_FEATURE_DISABLED"
+        options.experiences.renderMode != WtsExperienceRenderMode.MANUAL ->
+            "EXPERIENCE_MANUAL_MODE_REQUIRED"
+        experienceConsent == WtsExperienceConsent.PERSONALIZED && !profileConsentGranted ->
+            "EXPERIENCE_PROFILE_CONSENT_REQUIRED"
+        else -> "EXPERIENCE_CONSENT_REQUIRED"
+    }
+
+    private fun notifyNextManualExperienceIfAvailable() {
+        if (!isManualExperienceRuntimeEnabled() || presentingExperience != null) return
+        val handler = experienceAvailableHandler ?: return
+        val next = experienceQueue.firstOrNull() ?: return
+        if (offeredManualExperienceId == next.exposureId) return
+        offeredManualExperienceId = next.exposureId
+        handler(
+            WtsExperienceManualPresentation(
+                experience = next.experience,
+                handle = WtsExperiencePresentationHandle.issued(next.exposureId),
+            ),
+        )
+    }
 
     /**
      * Explicitly joins a dashboard-created SDK Test & Validate session. Until this
@@ -703,6 +902,11 @@ class WtsSdk internal constructor(
             return
         }
         profileConsentGranted = false
+        setIdentityBound(false)
+        if (experienceConsent == WtsExperienceConsent.PERSONALIZED) {
+            experienceConsent = WtsExperienceConsent.PENDING
+            clearExperienceRuntime(clearInteractionQueue = true)
+        }
         if (!identityStore.save(emptyList())) throw WtsSdkException.Storage
         enqueueIdentity(type = "reset_identity")
         identitySessionId = UUID.randomUUID().toString().lowercase()
@@ -755,6 +959,7 @@ class WtsSdk internal constructor(
 
     suspend fun resetIdentity() {
         requireProfileConsent()
+        setIdentityBound(false)
         enqueueIdentity(type = "reset_identity")
         identitySessionId = UUID.randomUUID().toString().lowercase()
     }
@@ -820,6 +1025,10 @@ class WtsSdk internal constructor(
                     response.duplicates +
                     response.rejected.filterNot { it.retryable }.map { it.clientMutationId }
                 ).toSet()
+            updateIdentityBinding(
+                mutations = batch,
+                acceptedOrDuplicate = (response.accepted + response.duplicates).toSet(),
+            )
             val remaining = queued.filterNot { it.clientMutationId in terminal }
             if (!identityStore.save(remaining)) {
                 throw WtsSdkException.Storage
@@ -838,13 +1047,47 @@ class WtsSdk internal constructor(
         }
     }
 
+    private fun effectiveExperienceConsent(): WtsExperienceConsent =
+        if (experienceConsent == WtsExperienceConsent.PERSONALIZED && !identityBound) {
+            WtsExperienceConsent.CONTEXTUAL
+        } else {
+            experienceConsent
+        }
+
+    private fun updateIdentityBinding(
+        mutations: List<IdentityMutationRequest>,
+        acceptedOrDuplicate: Set<String>,
+    ) {
+        mutations.filter { it.clientMutationId in acceptedOrDuplicate }.forEach { mutation ->
+            when (mutation.type) {
+                "identify" -> setIdentityBound(true)
+                "reset_identity" -> setIdentityBound(false)
+            }
+        }
+    }
+
+    private fun setIdentityBound(bound: Boolean) {
+        val editor = preferences.edit()
+        if (bound) {
+            editor.putString(IDENTITY_BOUND_SOURCE_KEY, appKey)
+        } else {
+            editor.remove(IDENTITY_BOUND_SOURCE_KEY)
+        }
+        if (!editor.commit()) throw WtsSdkException.Storage
+        identityBound = bound
+    }
+
     private suspend fun refreshExperienceManifest() {
+        if (experienceConsent == WtsExperienceConsent.PERSONALIZED && !profileConsentGranted) {
+            throw WtsSdkException.ExperienceProfileConsentRequired
+        }
+        val deliveryConsent = effectiveExperienceConsent()
         val response: ExperienceBootstrapResponse = postExperience(
             path = "experiences/v1/bootstrap",
             body = json.encodeToString(
                 ExperienceBootstrapRequest.serializer(),
                 ExperienceBootstrapRequest(
-                    consent = experienceConsent.wireValue(),
+                    consent = deliveryConsent.wireValue(),
                     profileConsentGranted = profileConsentGranted,
                     actorId = installId,
                     sessionId = identitySessionId,
@@ -855,16 +1098,18 @@ class WtsSdk internal constructor(
             ),
             serializer = ExperienceBootstrapResponse.serializer(),
         )
-        val expiry = parseExperienceTimestamp(response.expiresAt)
-        if (expiry <= System.currentTimeMillis() ||
-            response.manifest.expiresAt != response.expiresAt ||
-            response.signature.isEmpty() ||
-            response.keyId.isEmpty()
-        ) {
+        val verifiedManifest = ExperienceManifestVerifier.verify(
+            response = response,
+            verificationKeys = options.experiences.manifestVerificationKeys,
+            expectedSourceKey = appKey,
+            json = json,
+        ) ?: throw WtsSdkException.InvalidResponse()
+        val expiry = parseExperienceTimestamp(verifiedManifest.expiresAt)
+        if (expiry <= System.currentTimeMillis()) {
             throw WtsSdkException.InvalidResponse()
         }
-        experienceManifest = response.manifest
-        experienceCandidates = response.manifest.campaigns.map { it.campaignVersionId }
+        experienceManifest = verifiedManifest
+        experienceCandidates = verifiedManifest.campaigns.map { it.campaignVersionId }
         experienceManifestExpiresAt = expiry
         experienceManifestRefreshAt = minOf(
             expiry,
@@ -878,7 +1123,8 @@ class WtsSdk internal constructor(
             experienceConsent !in setOf(
                 WtsExperienceConsent.CONTEXTUAL,
                 WtsExperienceConsent.PERSONALIZED,
-            )
+            ) ||
+            (experienceConsent == WtsExperienceConsent.PERSONALIZED && !profileConsentGranted)
         ) {
             return
         }
@@ -886,10 +1132,13 @@ class WtsSdk internal constructor(
             if (experienceManifestRefreshAt <= System.currentTimeMillis()) {
                 refreshExperienceManifest()
             }
-            val decisions = if (experienceConsent == WtsExperienceConsent.CONTEXTUAL) {
+            if (experienceConsent == WtsExperienceConsent.PERSONALIZED && !identityBound) {
+                runCatching { flushIdentity() }.onFailure { scheduleRetry() }
+            }
+            val deliveryConsent = effectiveExperienceConsent()
+            val decisions = if (deliveryConsent == WtsExperienceConsent.CONTEXTUAL) {
                 experienceManifest?.let { contextualExperienceDecisions(it, context) }.orEmpty()
             } else {
-                flushIdentity()
                 if (experienceCandidates.isEmpty()) {
                     emptyList()
                 } else {
@@ -898,7 +1147,7 @@ class WtsSdk internal constructor(
                         body = json.encodeToString(
                             ExperienceDecisionRequest.serializer(),
                             ExperienceDecisionRequest(
-                                consent = experienceConsent.wireValue(),
+                                consent = deliveryConsent.wireValue(),
                                 profileConsentGranted = profileConsentGranted,
                                 actorId = installId,
                                 sessionId = identitySessionId,
@@ -925,41 +1174,48 @@ class WtsSdk internal constructor(
                 }
                 val variant = decision.content ?: return@forEach
                 val variantId = decision.variantId ?: return@forEach
-                if (experienceQueue.any { it.campaignVersionId == decision.campaignVersionId } ||
-                    presentingExperience?.campaignVersionId == decision.campaignVersionId
+                if (experienceQueue.any { it.experience.campaignVersionId == decision.campaignVersionId } ||
+                    presentingExperience?.experience?.campaignVersionId == decision.campaignVersionId
                 ) {
                     return@forEach
                 }
-                val experience = WtsExperience(
-                    campaignId = decision.campaignId,
-                    campaignVersionId = decision.campaignVersionId,
-                    assignmentId = decision.assignmentId,
-                    variantId = variantId,
+                val runtime = RuntimeExperience(
+                    experience = WtsExperience(
+                        campaignId = decision.campaignId,
+                        campaignVersionId = decision.campaignVersionId,
+                        assignmentId = decision.assignmentId,
+                        variantId = variantId,
+                        placement = if (decision.placement == "bottom_sheet") {
+                            WtsExperiencePlacement.BOTTOM_SHEET
+                        } else {
+                            WtsExperiencePlacement.MODAL
+                        },
+                        priority = decision.priority,
+                        content = variant.content.toPublic(),
+                        assetUrl = variant.asset?.url,
+                    ),
                     exposureId = UUID.randomUUID().toString(),
-                    placement = if (decision.placement == "bottom_sheet") {
-                        WtsExperiencePlacement.BOTTOM_SHEET
-                    } else {
-                        WtsExperiencePlacement.MODAL
-                    },
-                    priority = decision.priority,
-                    content = variant.content.toPublic(),
-                    assetUrl = variant.asset?.url,
                 )
-                experienceGrants[experience.assignmentId] = decision.grant
-                experienceQueue += experience
+                experienceGrants[runtime.experience.assignmentId] = decision.grant
+                experienceQueue += runtime
+                if (options.experiences.renderMode == WtsExperienceRenderMode.MANUAL) {
+                    manualExperienceStates[runtime.exposureId] = ManualExperienceState(runtime)
+                }
                 experienceQueue.sortWith(
-                    compareByDescending<WtsExperience> { it.priority }
-                        .thenBy { it.campaignId },
+                    compareByDescending<RuntimeExperience> { it.experience.priority }
+                        .thenBy { it.experience.campaignId },
                 )
-                while (experienceQueue.size > 5) experienceQueue.removeAt(experienceQueue.lastIndex)
+                while (experienceQueue.size > 5) {
+                    val dropped = experienceQueue.removeAt(experienceQueue.lastIndex)
+                    manualExperienceStates.remove(dropped.exposureId)
+                }
                 listOf("assigned_variant", "eligible", "queued").forEach { type ->
                     interactions += decision.toInteraction(
-                        exposureId = experience.exposureId,
+                        exposureId = runtime.exposureId,
                         type = type,
                         triggerEventId = context.triggerEventId,
                     )
                 }
-                experienceAvailableHandler?.invoke(experience)
             }
             if (interactions.isNotEmpty()) {
                 runCatching { sendExperienceInteractions(interactions) }
@@ -967,6 +1223,8 @@ class WtsSdk internal constructor(
             }
             if (options.experiences.renderMode == WtsExperienceRenderMode.AUTOMATIC) {
                 withContext(Dispatchers.Main) { presentNextExperience() }
+            } else {
+                notifyNextManualExperienceIfAvailable()
             }
         } catch (error: WtsSdkException) {
             experienceLastErrorCode = error.code
@@ -1129,7 +1387,7 @@ class WtsSdk internal constructor(
                 body = json.encodeToString(
                     ExperienceInteractionBatchRequest.serializer(),
                     ExperienceInteractionBatchRequest(
-                        consent = experienceConsent.wireValue(),
+                        consent = effectiveExperienceConsent().wireValue(),
                         profileConsentGranted = profileConsentGranted,
                         actorId = installId,
                         sessionId = identitySessionId,
@@ -1166,11 +1424,12 @@ class WtsSdk internal constructor(
     }
 
     private suspend fun recordExperience(
-        experience: WtsExperience,
+        runtime: RuntimeExperience,
         type: String,
         actionId: String? = null,
         failureCode: String? = null,
     ) {
+        val experience = runtime.experience
         val grant = experienceGrants[experience.assignmentId] ?: return
         runCatching {
             sendExperienceInteractions(
@@ -1181,7 +1440,7 @@ class WtsSdk internal constructor(
                         campaignVersionId = experience.campaignVersionId,
                         assignmentId = experience.assignmentId,
                         variantId = experience.variantId,
-                        exposureId = experience.exposureId,
+                        exposureId = runtime.exposureId,
                         type = type,
                         actionId = actionId,
                         metadata = Metadata.current(appContext),
@@ -1193,28 +1452,22 @@ class WtsSdk internal constructor(
     }
 
     private suspend fun handleExperienceAction(
-        experience: WtsExperience,
+        runtime: RuntimeExperience,
         action: WtsExperienceAction,
     ) {
         if (!isExperienceActionAllowed(action)) {
             experienceLastErrorCode = "EXPERIENCE_ACTION_NOT_ALLOWED"
             return
         }
+        val experience = runtime.experience
         val handled = experienceActionHandler?.invoke(experience, action) == true
         if (!handled) performSafeExperienceAction(action)
-        val localized = experience.content.translations.values.firstOrNull()
         recordExperience(
-            experience,
-            if (localized?.primaryAction?.id == action.id) "primary_action" else "secondary_action",
+            runtime,
+            if (experience.isPrimaryAction(action.id)) "primary_action" else "secondary_action",
             actionId = action.id,
         )
-        if (
-            action.type == WtsExperienceActionType.OPEN_INTERNAL_ROUTE ||
-            action.type == WtsExperienceActionType.OPEN_DEEP_LINK ||
-            action.type == WtsExperienceActionType.OPEN_WEB_URL
-        ) {
-            experienceQueue.clear()
-        }
+        if (action.type.isNavigationAction()) clearQueuedExperiences()
     }
 
     private fun isExperienceActionAllowed(action: WtsExperienceAction): Boolean {
@@ -1234,9 +1487,14 @@ class WtsSdk internal constructor(
             }
             WtsExperienceActionType.OPEN_DEEP_LINK -> {
                 val uri = target?.let(Uri::parse)
-                uri?.scheme?.lowercase() in options.experiences.allowedDeepLinkSchemes ||
-                    (uri?.scheme == "https" &&
-                        uri.host?.lowercase() in options.experiences.allowedDeepLinkHosts)
+                val scheme = uri?.scheme?.lowercase()
+                if (scheme == null || isUnsafeExperienceScheme(scheme)) {
+                    false
+                } else if (scheme == "https") {
+                    uri.host?.lowercase() in options.experiences.allowedDeepLinkHosts
+                } else {
+                    scheme in options.experiences.allowedDeepLinkSchemes
+                }
             }
         }
     }
@@ -1262,19 +1520,52 @@ class WtsSdk internal constructor(
             }
             WtsExperienceActionType.OPEN_DEEP_LINK -> {
                 val uri = Uri.parse(target)
-                val allowed = uri.scheme?.lowercase() in options.experiences.allowedDeepLinkSchemes ||
-                    (uri.scheme == "https" &&
-                        uri.host?.lowercase() in options.experiences.allowedDeepLinkHosts)
+                val scheme = uri.scheme?.lowercase()
+                val allowed = if (scheme == null || isUnsafeExperienceScheme(scheme)) {
+                    false
+                } else if (scheme == "https") {
+                    uri.host?.lowercase() in options.experiences.allowedDeepLinkHosts
+                } else {
+                    scheme in options.experiences.allowedDeepLinkSchemes
+                }
                 if (allowed) launchUri(uri)
             }
         }
     }
+
+    private fun isUnsafeExperienceScheme(scheme: String): Boolean =
+        scheme in setOf(
+            "about",
+            "blob",
+            "data",
+            "file",
+            "filesystem",
+            "http",
+            "javascript",
+            "vbscript",
+        )
 
     private fun launchUri(uri: Uri) {
         appContext.startActivity(
             Intent(Intent.ACTION_VIEW, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
         )
     }
+
+    private fun WtsExperience.findAction(actionId: String): WtsExperienceAction? =
+        content.translations.values
+            .asSequence()
+            .flatMap { localized ->
+                sequenceOf(localized.primaryAction, localized.secondaryAction).filterNotNull()
+            }
+            .firstOrNull { it.id == actionId }
+
+    private fun WtsExperience.isPrimaryAction(actionId: String): Boolean =
+        content.translations.values.any { it.primaryAction?.id == actionId }
+
+    private fun WtsExperienceActionType.isNavigationAction(): Boolean =
+        this == WtsExperienceActionType.OPEN_INTERNAL_ROUTE ||
+            this == WtsExperienceActionType.OPEN_DEEP_LINK ||
+            this == WtsExperienceActionType.OPEN_WEB_URL
 
     private fun activeTestSession(): PersistedTestSession? {
         val current = testSession ?: return null
@@ -1554,11 +1845,17 @@ class WtsSdk internal constructor(
 
     private fun parseExperienceTimestamp(value: String): Long {
         if (!value.endsWith("Z")) throw WtsSdkException.InvalidResponse()
-        return runCatching {
-            SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSZ", Locale.US).apply {
-                isLenient = false
-            }.parse("${value.dropLast(1)}+0000")?.time
-        }.getOrNull() ?: throw WtsSdkException.InvalidResponse()
+        val normalized = "${value.dropLast(1)}+0000"
+        return listOf(
+            "yyyy-MM-dd'T'HH:mm:ss.SSSZ",
+            "yyyy-MM-dd'T'HH:mm:ssZ",
+        ).firstNotNullOfOrNull { pattern ->
+            runCatching {
+                SimpleDateFormat(pattern, Locale.US).apply {
+                    isLenient = false
+                }.parse(normalized)?.time
+            }.getOrNull()
+        } ?: throw WtsSdkException.InvalidResponse()
     }
 
     private suspend fun <T> postExperience(
@@ -1823,7 +2120,7 @@ class WtsSdk internal constructor(
         json.encodeToString(
             ExperienceInteractionBatchRequest.serializer(),
             ExperienceInteractionBatchRequest(
-                consent = experienceConsent.wireValue(),
+                consent = effectiveExperienceConsent().wireValue(),
                 profileConsentGranted = profileConsentGranted,
                 actorId = installId,
                 sessionId = identitySessionId,
@@ -1847,11 +2144,15 @@ class WtsSdk internal constructor(
     }
 
     companion object {
-        const val VERSION = "0.3.0-alpha.1"
+        const val VERSION = "0.4.0-alpha.1"
         private const val PREFERENCES = "co.wetus.wts-sdk"
         private const val INSTALL_ID = "install-id"
+        private const val IDENTITY_BOUND_SOURCE_KEY = "identity-bound-source-key-v1"
         private const val DEFERRED_TERMINAL = "deferred-terminal-v1"
         private const val EXPERIENCE_MANIFEST_CACHE_MS = 5 * 60_000L
+        private const val EXPERIENCE_QUEUE_COOLDOWN_MILLIS = 3_000L
+        private const val EXPERIENCE_MANIFEST_VERIFICATION_FAILED =
+            "EXPERIENCE_MANIFEST_VERIFICATION_FAILED"
         private val JSON_MEDIA_TYPE = "application/json".toMediaType()
         private val ATTRIBUTE_KEY = Regex("^[a-z][a-z0-9_]{0,63}$")
         private val ISO_DATE =

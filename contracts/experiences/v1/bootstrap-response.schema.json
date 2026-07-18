@@ -3,9 +3,17 @@
   "$id": "https://wts.is/schemas/experiences/v1/bootstrap-response.json",
   "type": "object",
   "additionalProperties": false,
-  "required": ["manifest", "signature", "keyId", "expiresAt"],
+  "required": ["manifest", "signedPayload", "signature", "keyId", "expiresAt"],
   "properties": {
-    "manifest": { "type": "object" },
+    "manifest": {
+      "type": "object",
+      "required": ["sourceKey"],
+      "properties": {
+        "sourceKey": { "type": "string", "minLength": 1, "maxLength": 256 }
+      },
+      "additionalProperties": true
+    },
+    "signedPayload": { "type": "string", "minLength": 1 },
     "signature": { "type": "string" },
     "keyId": { "type": "string" },
     "expiresAt": { "type": "string", "format": "date-time" }
