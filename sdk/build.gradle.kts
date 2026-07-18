@@ -6,7 +6,7 @@ plugins {
 }
 
 group = "co.wetus"
-version = "0.3.0-alpha.1"
+version = "0.4.0-alpha.1"
 
 android {
     namespace = "co.wetus.sdk"
@@ -28,6 +28,7 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.9.0")
     implementation("com.squareup.okhttp3:okhttp:5.1.0")
     implementation("com.android.installreferrer:installreferrer:2.2")
+    implementation("net.i2p.crypto:eddsa:0.3.0")
     testImplementation(kotlin("test"))
     testImplementation("junit:junit:4.13.2")
     testImplementation("androidx.test:core:1.6.1")

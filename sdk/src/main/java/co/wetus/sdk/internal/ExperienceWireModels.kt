@@ -3,6 +3,7 @@ package co.wetus.sdk.internal
 import co.wetus.sdk.WtsExperienceConsent
 import java.util.UUID
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 
 @Serializable
@@ -28,7 +29,13 @@ internal data class ExperienceBootstrapRequest(
 
 @Serializable
 internal data class ExperienceBootstrapResponse(
-    val manifest: Manifest,
+    /**
+     * Compatibility copy from the collector. It is intentionally decoded as
+     * opaque JSON and must never influence runtime behavior; only
+     * `signedPayload` is verified and decoded as a Manifest.
+     */
+    val manifest: JsonElement,
+    val signedPayload: String,
     val signature: String,
     val keyId: String,
     val expiresAt: String,

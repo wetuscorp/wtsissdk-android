@@ -2,11 +2,11 @@
 
 Official SDK for verified Android App Links, deterministic Play Install Referrer deferred deep links, and offline custom event/revenue delivery. It returns validated route data; navigation remains under application control.
 
-> `0.3.0-alpha.1` source line · Mobile Protocol V3 + Identity V1 + Experiences V1 + SDK Test Session V1 · minSdk 23 · compileSdk 36 · Java 17
+> `0.4.0-alpha.1` source line · Mobile Protocol V3 + Identity V1 + Experiences V1 + SDK Test Session V1 · minSdk 23 · compileSdk 36 · Java 17
 
 > **Release note:** SDK Test & Validate APIs below are source-line APIs. Use
 > them only after the matching Android package release has been published. This
-> document does not claim that `0.3.0-alpha.1` is already available from Maven
+> document does not claim that `0.4.0-alpha.1` is already available from Maven
 > Central.
 
 ## Install
@@ -93,6 +93,10 @@ WtsSdk.configure(
         experiences = WtsExperienceOptions(
             enabled = true,
             renderMode = WtsExperienceRenderMode.AUTOMATIC,
+            // Public Ed25519 verification keys: kid -> base64 SPKI DER.
+            manifestVerificationKeys = mapOf(
+                "current-experience-kid" to "BASE64_SPKI_DER_ED25519_PUBLIC_KEY",
+            ),
             allowedInternalRoutes = setOf("/checkout", "/account"),
             allowedCallbackKeys = setOf("apply_offer"),
             allowedDeepLinkHosts = setOf("go.example.com"),
@@ -105,13 +109,52 @@ WtsSdk.configure(
 WtsSdk.shared().setExperienceConsent(WtsExperienceConsent.CONTEXTUAL)
 ```
 
+The key map contains public verification material, not a secret. Get the
+current key id and base64 SPKI DER public key from the Experience setup for the
+same source; never embed a manifest signing private key in an application.
+The SDK accepts a manifest only after it verifies the collector's signed
+payload with the matching key id. The unsigned compatibility `manifest` field
+in the response is never used for a decision or render.
+
 Use `PERSONALIZED` only after profile consent. `PENDING` makes no Experience
 request; `DENIED` clears local Experience state and unsent interactions.
-Automatic mode uses native modal or bottom-sheet presentation. Manual mode
-notifies `onExperienceAvailable` and waits for
-`presentNextExperience()`. Interactions use a private persistent bounded queue,
-UUID idempotency and retry. Impressions require one uninterrupted second of
-native visibility.
+Automatic mode uses native modal or bottom-sheet presentation.
+
+Manual mode never invokes the native renderer. It supplies one opaque,
+process-local presentation handle per queued Experience; do not persist it,
+log it, or treat it as an authorization token. A host renderer must report the
+real lifecycle with that handle:
+
+```kotlin
+WtsSdk.shared().onExperienceAvailable { presentation ->
+    renderExperience(presentation.experience) { renderSucceeded, visibleForOneSecond, actionId, dismiss ->
+        lifecycleScope.launch {
+            if (renderSucceeded) {
+                WtsSdk.shared().acknowledgeExperienceRender(presentation.handle)
+            }
+            if (visibleForOneSecond) {
+                WtsSdk.shared().acknowledgeExperienceImpression(presentation.handle)
+            }
+            actionId?.let {
+                WtsSdk.shared().reportExperienceAction(presentation.handle, it)
+            }
+            if (dismiss) {
+                WtsSdk.shared().dismissExperience(
+                    presentation.handle,
+                    WtsExperienceDismissReason.DISMISSED,
+                )
+            }
+        }
+    }
+}
+```
+
+Each lifecycle call is validated against the live manual presentation; duplicate
+acknowledgements are idempotent and stale or forged handles are rejected.
+Interactions use a private persistent bounded queue, UUID idempotency and
+retry. Impressions require one uninterrupted second of native visibility.
+HTTPS deep-link actions require an exact host in `allowedDeepLinkHosts`; adding
+`https` to `allowedDeepLinkSchemes` never bypasses that host allowlist.
 
 For an unpublished device test, copy
 `WtsSdk.shared().getExperienceDiagnostics().testDeviceToken` into the
