@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "participantId": "participant_01",
+  "sessionToken": "test_session_token_000000000000000000000000",
+  "signals": [
+    {
+      "clientSignalId": "9c45fe52-e4d4-483a-b41b-159e2d6a5c05",
+      "type": "event_recorded",
+      "outcome": "observed",
+      "occurredAt": "2026-07-18T10:00:00.000Z",
+      "eventKey": "checkout_started",
+      "propertyKeys": ["currency", "cart_total"],
+      "propertyTypes": {
+        "currency": "string",
+        "cart_total": "number"
+      }
+    }
+  ]
+}

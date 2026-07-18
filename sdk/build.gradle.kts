@@ -6,7 +6,7 @@ plugins {
 }
 
 group = "co.wetus"
-version = "0.2.0-alpha.1"
+version = "0.3.0-alpha.1"
 
 android {
     namespace = "co.wetus.sdk"
@@ -44,7 +44,7 @@ mavenPublishing {
     coordinates("co.wetus", "wts-sdk", version.toString())
     pom {
         name.set("wts.is Android SDK")
-        description.set("Official wts.is deep-link and mobile attribution SDK")
+        description.set("Official wts.is deep-link, analytics, identity and Experiences SDK")
         inceptionYear.set("2026")
         url.set("https://github.com/wetuscorp/wtsissdk-android")
         licenses {

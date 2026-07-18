@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wts.is/schemas/experiences/v1/bootstrap-response.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["manifest", "signature", "keyId", "expiresAt"],
+  "properties": {
+    "manifest": { "type": "object" },
+    "signature": { "type": "string" },
+    "keyId": { "type": "string" },
+    "expiresAt": { "type": "string", "format": "date-time" }
+  }
+}

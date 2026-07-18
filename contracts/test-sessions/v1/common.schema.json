@@ -1,0 +1,129 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wts.is/schemas/sdk/test-sessions/v1/common.json",
+  "$defs": {
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["platform", "sdkFamily", "sdkVersion", "locale"],
+      "properties": {
+        "platform": { "enum": ["web", "ios", "android"] },
+        "sdkFamily": { "enum": ["web", "swift", "android", "flutter", "react_native"] },
+        "sdkVersion": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "appVersion": { "type": "string", "maxLength": 64 },
+        "osVersion": { "type": "string", "maxLength": 64 },
+        "locale": { "type": "string", "minLength": 1, "maxLength": 32 }
+      }
+    },
+    "propertyType": {
+      "enum": ["string", "number", "boolean", "date", "string_array"]
+    },
+    "consent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["analytics"],
+      "properties": {
+        "analytics": { "enum": ["granted", "pending", "denied"] },
+        "profile": { "type": "boolean" },
+        "experience": { "enum": ["pending", "contextual", "personalized", "denied"] }
+      }
+    },
+    "testPlan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["profile", "events", "deepLink", "experience", "screen"],
+      "properties": {
+        "profile": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["selected", "available", "allowedMethods"],
+              "properties": {
+                "selected": { "type": "boolean" },
+                "available": { "type": "boolean" },
+                "allowedMethods": {
+                  "type": "array",
+                  "uniqueItems": true,
+                  "items": {
+                    "enum": ["identify", "update_user", "set_once", "increment", "reported_attribution", "reset_identity"]
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "events": {
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["eventKey", "properties", "revenueEnabled"],
+            "properties": {
+              "eventKey": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$", "minLength": 2, "maxLength": 64 },
+              "properties": {
+                "type": "array",
+                "maxItems": 20,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["key", "type", "required"],
+                  "properties": {
+                    "key": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$", "minLength": 2, "maxLength": 64 },
+                    "type": { "$ref": "#/$defs/propertyType" },
+                    "required": { "type": "boolean" }
+                  }
+                }
+              },
+              "revenueEnabled": { "type": "boolean" }
+            }
+          }
+        },
+        "deepLink": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["selected", "available", "linkId"],
+              "properties": {
+                "selected": { "type": "boolean" },
+                "available": { "type": "boolean" },
+                "linkId": { "type": ["string", "null"], "maxLength": 128 }
+              }
+            }
+          ]
+        },
+        "experience": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["selected", "available", "campaignId", "versionId"],
+              "properties": {
+                "selected": { "type": "boolean" },
+                "available": { "type": "boolean" },
+                "campaignId": { "type": ["string", "null"], "maxLength": 128 },
+                "versionId": { "type": ["string", "null"], "maxLength": 128 }
+              }
+            }
+          ]
+        },
+        "screen": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["selected"],
+              "properties": { "selected": { "const": true } }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

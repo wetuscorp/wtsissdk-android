@@ -33,7 +33,7 @@ internal data class Metadata(
 
 @Serializable
 internal data class ResolveRequest(
-    val schemaVersion: Int = 2,
+    val schemaVersion: Int = 3,
     val clientEventId: String = UUID.randomUUID().toString(),
     val installId: String,
     val occurredAt: String = isoTimestamp(),
@@ -43,7 +43,7 @@ internal data class ResolveRequest(
 
 @Serializable
 internal data class DeferredRequest(
-    val schemaVersion: Int = 2,
+    val schemaVersion: Int = 3,
     val clientEventId: String = UUID.randomUUID().toString(),
     val installId: String,
     val occurredAt: String = isoTimestamp(),
@@ -63,12 +63,15 @@ internal data class ResolveResponse(
 
 @Serializable
 internal data class EventRequest(
-    val schemaVersion: Int = 2,
+    val schemaVersion: Int = 3,
     val clientEventId: String = UUID.randomUUID().toString(),
     val installId: String,
+    val sessionId: String? = null,
     val occurredAt: String = isoTimestamp(),
     val metadata: Metadata,
-    val eventKey: String,
+    val type: String = "custom",
+    val eventKey: String? = null,
+    val screenName: String? = null,
     val properties: JsonObject,
     val revenue: RevenueWire? = null,
     val linkId: String? = null,
@@ -79,7 +82,7 @@ internal data class RevenueWire(val amount: String, val currency: String) {
     companion object { fun from(value: WtsRevenue) = RevenueWire(value.amount, value.normalizedCurrency) }
 }
 
-@Serializable internal data class EventBatch(val schemaVersion: Int = 2, val events: List<EventRequest>)
+@Serializable internal data class EventBatch(val schemaVersion: Int = 3, val events: List<EventRequest>)
 
 @Serializable
 internal data class EventBatchResponse(
@@ -162,7 +165,7 @@ internal data class RejectedIdentityMutation(
     val retryable: Boolean,
 )
 
-private fun isoTimestamp(): String = SimpleDateFormat(
+internal fun isoTimestamp(): String = SimpleDateFormat(
     "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'",
     Locale.US,
 ).apply { timeZone = TimeZone.getTimeZone("UTC") }.format(Date())

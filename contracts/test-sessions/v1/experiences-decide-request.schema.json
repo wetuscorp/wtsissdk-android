@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wts.is/schemas/sdk/test-sessions/v1/experiences-decide-request.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "participantId", "sessionToken", "context"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "participantId": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "sessionToken": { "type": "string", "minLength": 32, "maxLength": 512 },
+    "context": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "pathname", "locale"],
+          "properties": {
+            "type": { "const": "page_view" },
+            "pathname": { "type": "string", "pattern": "^/", "maxLength": 2048 },
+            "pageName": { "type": "string", "minLength": 1, "maxLength": 120 },
+            "locale": { "type": "string", "minLength": 1, "maxLength": 32 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "screenName", "locale"],
+          "properties": {
+            "type": { "const": "screen_view" },
+            "screenName": { "type": "string", "minLength": 1, "maxLength": 120 },
+            "locale": { "type": "string", "minLength": 1, "maxLength": 32 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "eventKey", "locale"],
+          "properties": {
+            "type": { "const": "custom_event" },
+            "eventKey": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$", "minLength": 2, "maxLength": 64 },
+            "properties": {
+              "type": "object",
+              "maxProperties": 20,
+              "propertyNames": { "pattern": "^[a-z][a-z0-9_]*$", "minLength": 2, "maxLength": 64 },
+              "additionalProperties": { "oneOf": [{ "type": "string" }, { "type": "number" }, { "type": "boolean" }] }
+            },
+            "locale": { "type": "string", "minLength": 1, "maxLength": 32 }
+          }
+        }
+      ]
+    }
+  }
+}

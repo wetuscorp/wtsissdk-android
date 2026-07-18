@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wts.is/schemas/sdk/test-sessions/v1/signals-batch.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "participantId", "sessionToken", "signals"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "participantId": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "sessionToken": { "type": "string", "minLength": 32, "maxLength": 512 },
+    "signals": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 50,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["clientSignalId", "type", "outcome", "occurredAt"],
+        "properties": {
+          "clientSignalId": { "type": "string", "format": "uuid" },
+          "type": {
+            "enum": [
+              "sdk_connected", "consent", "deep_link_resolved", "event_recorded",
+              "identity_recorded", "screen_recorded", "experience_impression",
+              "experience_action", "probe_completed", "sdk_left"
+            ]
+          },
+          "outcome": { "enum": ["passed", "failed", "observed", "blocked"] },
+          "occurredAt": { "type": "string", "format": "date-time" },
+          "method": { "type": "string", "pattern": "^[a-z][a-z0-9_.-]*$", "maxLength": 64 },
+          "eventKey": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$", "minLength": 2, "maxLength": 64 },
+          "screenName": { "type": "string", "minLength": 1, "maxLength": 128 },
+          "propertyKeys": {
+            "type": "array",
+            "maxItems": 20,
+            "items": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$", "minLength": 2, "maxLength": 64 }
+          },
+          "propertyTypes": {
+            "type": "object",
+            "maxProperties": 20,
+            "propertyNames": { "pattern": "^[a-z][a-z0-9_]*$", "minLength": 2, "maxLength": 64 },
+            "additionalProperties": { "$ref": "common.schema.json#/$defs/propertyType" }
+          },
+          "revenue": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["present", "currency"],
+            "properties": {
+              "present": { "const": true },
+              "currency": { "type": "string", "pattern": "^[A-Z]{3}$" }
+            }
+          },
+          "resultCode": { "type": "string", "pattern": "^[A-Z0-9_:-]+$", "maxLength": 64 },
+          "feature": { "type": "string", "pattern": "^[a-z][a-z0-9_.-]*$", "maxLength": 64 }
+        }
+      }
+    }
+  }
+}

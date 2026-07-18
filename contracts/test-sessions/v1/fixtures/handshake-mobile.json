@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "participantId": "participant_01",
+  "sessionToken": "test_session_token_000000000000000000000000",
+  "metadata": {
+    "platform": "android",
+    "sdkFamily": "flutter",
+    "sdkVersion": "0.3.0-alpha.1",
+    "appVersion": "1.4.0",
+    "osVersion": "15",
+    "locale": "tr-TR"
+  },
+  "capabilities": {
+    "deeplink": true,
+    "identity": true,
+    "screen": true,
+    "experiences": true,
+    "offlineQueue": true
+  },
+  "consent": {
+    "analytics": "granted",
+    "profile": true,
+    "experience": "contextual"
+  }
+}

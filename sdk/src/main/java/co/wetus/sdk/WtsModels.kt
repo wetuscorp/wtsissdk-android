@@ -74,6 +74,8 @@ data class WtsOptions(
     val requestTimeoutMillis: Long = 2_000,
     val cacheTtlMillis: Long = 60_000,
     val logLevel: WtsLogLevel = WtsLogLevel.OFF,
+    val collectorBaseUrl: String = "https://collect.wts.is",
+    val experiences: WtsExperienceOptions = WtsExperienceOptions(),
 )
 
 sealed class WtsSdkException(message: String, cause: Throwable? = null) : Exception(message, cause) {
@@ -122,6 +124,10 @@ sealed class WtsSdkException(message: String, cause: Throwable? = null) : Except
     data object ProfileConsentRequired :
         WtsSdkException("Profile consent must be granted before using identity APIs.") {
         override val code = "PROFILE_CONSENT_REQUIRED"
+    }
+    data object ExperienceProfileConsentRequired :
+        WtsSdkException("Personalized Experiences require profile consent.") {
+        override val code = "EXPERIENCE_PROFILE_CONSENT_REQUIRED"
     }
     data object Storage : WtsSdkException("The wts.is local event queue could not be persisted.") {
         override val code = "STORAGE_ERROR"

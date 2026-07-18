@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "pairingToken": "test_pairing_token_000000000000000000000000",
+  "metadata": {
+    "platform": "web",
+    "sdkFamily": "web",
+    "sdkVersion": "0.3.0-alpha.1",
+    "locale": "tr-TR"
+  }
+}

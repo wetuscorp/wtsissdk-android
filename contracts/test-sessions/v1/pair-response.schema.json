@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wts.is/schemas/sdk/test-sessions/v1/pair-response.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["session", "participant", "sessionToken", "testProfile", "requiredSdkVersion", "testPlan"],
+  "properties": {
+    "session": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "status", "expiresAt"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "status": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "expiresAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "participant": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "sourceId", "sourceType", "status"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "sourceId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "sourceType": { "enum": ["mobile_app", "web_app"] },
+        "status": { "const": "paired" }
+      }
+    },
+    "sessionToken": { "type": "string", "minLength": 32, "maxLength": 512 },
+    "testProfile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["externalUserId"],
+      "properties": {
+        "externalUserId": { "type": "string", "minLength": 1, "maxLength": 128 }
+      }
+    },
+    "requiredSdkVersion": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "testPlan": { "$ref": "common.schema.json#/$defs/testPlan" }
+  }
+}
