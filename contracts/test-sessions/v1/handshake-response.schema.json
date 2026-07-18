@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wts.is/schemas/sdk/test-sessions/v1/handshake-response.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["accepted", "compatible", "requiredSdkVersion", "checks", "testPlan"],
+  "properties": {
+    "accepted": { "type": "boolean" },
+    "compatible": { "type": "boolean" },
+    "requiredSdkVersion": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "checks": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["key", "status"],
+        "properties": {
+          "key": { "type": "string", "minLength": 1, "maxLength": 128 },
+          "status": { "enum": ["ready", "warning", "blocked"] },
+          "code": { "type": ["string", "null"], "maxLength": 128 },
+          "message": { "type": "string", "minLength": 1, "maxLength": 500 }
+        }
+      }
+    },
+    "testPlan": { "$ref": "common.schema.json#/$defs/testPlan" }
+  }
+}

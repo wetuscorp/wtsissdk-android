@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wts.is/schemas/sdk/test-sessions/v1/pair-request.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "metadata"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "pairingToken": { "type": "string", "minLength": 32, "maxLength": 512 },
+    "pairingCode": { "type": "string", "pattern": "^[A-Z2-9]{16}$" },
+    "metadata": { "$ref": "common.schema.json#/$defs/metadata" }
+  },
+  "oneOf": [
+    { "required": ["pairingToken"], "not": { "required": ["pairingCode"] } },
+    { "required": ["pairingCode"], "not": { "required": ["pairingToken"] } }
+  ]
+}

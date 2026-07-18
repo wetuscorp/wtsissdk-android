@@ -1,5 +1,9 @@
 # Changelog
 
+> Entries for the `0.3.0-alpha.1` source line below are not a Maven Central
+> publication claim. Consume SDK Test & Validate only from its matching
+> published Android package release.
+
 ## 0.3.0-alpha.1
 
 - Added Mobile Protocol V3 built-in `screen` events.
@@ -7,6 +11,8 @@
 - Added contextual/personalized consent, native modal and bottom-sheet rendering, and manual mode.
 - Added typed safe-action allowlists and action/availability callbacks.
 - Added visibility-qualified impressions and persistent idempotent interaction retry.
+- Added opt-in SDK Test Session V1 pairing, diagnostics, isolated probes, and
+  explicit test-only Experience impression/action reporting.
 
 ## 0.2.0-alpha.1
 

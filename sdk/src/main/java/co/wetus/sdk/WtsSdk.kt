@@ -41,6 +41,24 @@ import co.wetus.sdk.internal.ResolveRequest
 import co.wetus.sdk.internal.ResolveResponse
 import co.wetus.sdk.internal.RevenueWire
 import co.wetus.sdk.internal.ReportedAttributionWire
+import co.wetus.sdk.internal.PersistedTestSession
+import co.wetus.sdk.internal.PreferencesTestSessionStore
+import co.wetus.sdk.internal.TestSessionCapabilities
+import co.wetus.sdk.internal.TestSessionConsent
+import co.wetus.sdk.internal.TestSessionHandshakeRequest
+import co.wetus.sdk.internal.TestSessionHandshakeResponse
+import co.wetus.sdk.internal.TestSessionExperienceDecisionRequest
+import co.wetus.sdk.internal.TestSessionExperienceDecisionResponse
+import co.wetus.sdk.internal.TestSessionLeaveRequest
+import co.wetus.sdk.internal.TestSessionLeaveResponse
+import co.wetus.sdk.internal.TestSessionPairRequest
+import co.wetus.sdk.internal.TestSessionPairResponse
+import co.wetus.sdk.internal.TestSessionResolveRequest
+import co.wetus.sdk.internal.TestSessionResolveResponse
+import co.wetus.sdk.internal.TestSessionSignal
+import co.wetus.sdk.internal.TestSessionSignalBatch
+import co.wetus.sdk.internal.TestSessionSignalBatchResponse
+import co.wetus.sdk.internal.TestSessionStore
 import co.wetus.sdk.internal.UserUpdateWire
 import java.io.IOException
 import java.net.SocketTimeoutException
@@ -79,6 +97,7 @@ class WtsSdk internal constructor(
     private val client: OkHttpClient,
     private val store: EventStore,
     private val identityStore: IdentityMutationStore,
+    private val testSessionStore: TestSessionStore,
     private val referrerSource: ReferrerSource,
 ) {
     private val appContext = context.applicationContext
@@ -112,11 +131,31 @@ class WtsSdk internal constructor(
     private var experienceSessionImpressions = 0
     private val experienceTestDeviceToken = UUID.randomUUID().toString().lowercase()
     private var experienceLastErrorCode: String? = null
+    private var testSession = testSessionStore.load()
+    private var testSessionLastErrorCode: String? = null
+    private var testSessionRetryJob: Job? = null
+    private var testSessionRetryAttempt = 0
+
+    init {
+        if (testSession?.let(::isTestSessionExpired) == true) {
+            testSession = null
+            testSessionStore.clear()
+        }
+    }
 
     suspend fun handle(uri: Uri): WtsDeepLink {
         val source = unwrap(uri)
         val key = source.toString()
-        cache.get(key, System.currentTimeMillis())?.let { return it }
+        cache.get(key, System.currentTimeMillis())?.let {
+            recordTestSessionSignal(
+                type = "deep_link_resolved",
+                outcome = "observed",
+                method = "handle",
+                resultCode = "RESOLVED",
+                feature = "deeplink",
+            )
+            return it
+        }
         val request = ResolveRequest(
             installId = installId,
             metadata = Metadata.current(appContext),
@@ -133,6 +172,13 @@ class WtsSdk internal constructor(
         }
         return response.toPublic().also {
             cache.put(key, it, System.currentTimeMillis() + options.cacheTtlMillis)
+            recordTestSessionSignal(
+                type = "deep_link_resolved",
+                outcome = "observed",
+                method = "handle",
+                resultCode = "RESOLVED",
+                feature = "deeplink",
+            )
         }
     }
 
@@ -180,6 +226,20 @@ class WtsSdk internal constructor(
             while (size > 100 || encodedSize(this) > 1_048_576) removeAt(0)
         }
         if (!store.save(queue)) throw WtsSdkException.Storage
+        recordTestSessionSignal(
+            type = "event_recorded",
+            outcome = "observed",
+            eventKey = eventKey,
+            propertyKeys = properties.keys.sorted(),
+            propertyTypes = properties.mapValues { (_, value) -> value.testSessionType() },
+            revenue = revenue?.let {
+                co.wetus.sdk.internal.TestSessionRevenueDescriptor(
+                    present = true,
+                    currency = it.currency.uppercase(),
+                )
+            },
+            feature = "events",
+        )
         scheduleFlush(0)
         evaluateExperiences(
             ExperienceContextWire(
@@ -219,6 +279,14 @@ class WtsSdk internal constructor(
             while (size > 100 || encodedSize(this) > 1_048_576) removeAt(0)
         }
         if (!store.save(queue)) throw WtsSdkException.Storage
+        recordTestSessionSignal(
+            type = "screen_recorded",
+            outcome = "observed",
+            screenName = normalized,
+            propertyKeys = properties.keys.sorted(),
+            propertyTypes = properties.mapValues { (_, value) -> value.testSessionType() },
+            feature = "screen",
+        )
         scheduleFlush(0)
         evaluateExperiences(
             ExperienceContextWire(
@@ -239,6 +307,11 @@ class WtsSdk internal constructor(
             throw WtsSdkException.ExperienceProfileConsentRequired
         }
         experienceConsent = consent
+        recordTestSessionSignal(
+            type = "consent",
+            outcome = "observed",
+            feature = "experiences",
+        )
         if (consent == WtsExperienceConsent.PENDING || consent == WtsExperienceConsent.DENIED) {
             experienceManifest = null
             experienceCandidates = emptyList()
@@ -326,7 +399,305 @@ class WtsSdk internal constructor(
         lastErrorCode = experienceLastErrorCode,
     )
 
+    /**
+     * Explicitly joins a dashboard-created SDK Test & Validate session. Until this
+     * method succeeds, no test-session request or observation is emitted.
+     */
+    suspend fun joinTestSession(
+        pairing: WtsTestSessionPairing,
+        sdkFamily: WtsSdkFamily = WtsSdkFamily.ANDROID,
+    ): WtsTestSessionJoinResult {
+        return try {
+            validateTestPairing(pairing)
+            val pair: TestSessionPairResponse = postTest(
+                path = "pair",
+                body = json.encodeToString(
+                    TestSessionPairRequest.serializer(),
+                    TestSessionPairRequest(
+                        pairingToken = pairing.pairingToken,
+                        pairingCode = pairing.pairingCode?.uppercase(),
+                        metadata = testSessionMetadata(sdkFamily),
+                    ),
+                ),
+                serializer = TestSessionPairResponse.serializer(),
+            )
+            val handshake: TestSessionHandshakeResponse = postTest(
+                path = "handshake",
+                body = json.encodeToString(
+                    TestSessionHandshakeRequest.serializer(),
+                    TestSessionHandshakeRequest(
+                        participantId = pair.participant.id,
+                        sessionToken = pair.sessionToken,
+                        metadata = testSessionMetadata(sdkFamily),
+                        capabilities = testSessionCapabilities(),
+                        consent = testSessionConsent(),
+                    ),
+                ),
+                serializer = TestSessionHandshakeResponse.serializer(),
+            )
+            val persisted = PersistedTestSession(
+                sourceKey = appKey,
+                sessionId = pair.session.id,
+                participantId = pair.participant.id,
+                sessionToken = pair.sessionToken,
+                expiresAt = pair.session.expiresAt,
+                compatible = handshake.accepted && handshake.compatible,
+                requiredSdkVersion = handshake.requiredSdkVersion,
+                sdkFamily = sdkFamily.wireValue,
+                checks = handshake.checks,
+                testPlan = handshake.testPlan,
+            )
+            testSession = persisted
+            testSessionLastErrorCode = null
+            if (!testSessionStore.save(persisted)) throw WtsSdkException.Storage
+            if (persisted.compatible) {
+                recordTestSessionSignal(
+                    type = "sdk_connected",
+                    outcome = "passed",
+                    feature = "sdk_test_session",
+                )
+            }
+            WtsTestSessionJoinResult(
+                accepted = handshake.accepted,
+                joined = true,
+                compatible = persisted.compatible,
+                requiredSdkVersion = handshake.requiredSdkVersion,
+                checks = handshake.checks.toPublicChecks(),
+                sessionId = pair.session.id,
+                expiresAt = pair.session.expiresAt,
+                testProfileExternalUserId = pair.testProfile.externalUserId,
+            )
+        } catch (error: Throwable) {
+            clearTestSession()
+            testSessionLastErrorCode = testSessionErrorCode(error)
+            WtsTestSessionJoinResult(
+                accepted = false,
+                joined = false,
+                compatible = false,
+                errorCode = testSessionLastErrorCode,
+            )
+        }
+    }
+
+    suspend fun leaveTestSession(): Boolean {
+        val active = activeTestSession() ?: return true
+        if (active.compatible) {
+            recordTestSessionSignal("sdk_left", "observed", feature = "sdk_test_session")
+            flushTestSessionSignals()
+        }
+        return try {
+            val response: TestSessionLeaveResponse = postTest(
+                path = "leave",
+                body = json.encodeToString(
+                    TestSessionLeaveRequest.serializer(),
+                    TestSessionLeaveRequest(
+                        participantId = active.participantId,
+                        sessionToken = active.sessionToken,
+                    ),
+                ),
+                serializer = TestSessionLeaveResponse.serializer(),
+            )
+            if (response.accepted) clearTestSession()
+            response.accepted
+        } catch (error: Throwable) {
+            testSessionLastErrorCode = testSessionErrorCode(error)
+            persistTestSession()
+            false
+        }
+    }
+
+    fun getTestSessionDiagnostics(): WtsTestSessionDiagnostics {
+        val active = activeTestSession()
+        return WtsTestSessionDiagnostics(
+            joined = active != null,
+            compatible = active?.compatible == true,
+            sessionId = active?.sessionId,
+            expiresAt = active?.expiresAt,
+            requiredSdkVersion = active?.requiredSdkVersion,
+            checks = active?.checks?.toPublicChecks().orEmpty(),
+            pendingSignals = active?.pendingSignals?.size ?: 0,
+            lastErrorCode = testSessionLastErrorCode,
+        )
+    }
+
+    suspend fun probeTestSessionUrl(url: String): WtsTestSessionProbeResult {
+        require(url.length <= 2_048 && Uri.parse(url).scheme == "https") {
+            "Test resolve URLs must be valid HTTPS URLs of at most 2048 characters."
+        }
+        val active = requireActiveTestSession()
+        return try {
+            val result: TestSessionResolveResponse = postTest(
+                path = "resolve",
+                body = json.encodeToString(
+                    TestSessionResolveRequest.serializer(),
+                    TestSessionResolveRequest(
+                        participantId = active.participantId,
+                        sessionToken = active.sessionToken,
+                        url = url,
+                    ),
+                ),
+                serializer = TestSessionResolveResponse.serializer(),
+            )
+            recordTestSessionSignal(
+                type = "probe_completed",
+                outcome = if (result.match) "passed" else "blocked",
+                method = "resolve",
+                resultCode = result.code,
+                feature = "deeplink",
+            )
+            result.toPublic()
+        } catch (error: Throwable) {
+            testSessionLastErrorCode = testSessionErrorCode(error)
+            recordTestSessionSignal(
+                type = "probe_completed",
+                outcome = "failed",
+                method = "resolve",
+                resultCode = testSessionLastErrorCode,
+                feature = "deeplink",
+            )
+            throw error
+        }
+    }
+
+    /**
+     * Emits only test-protocol signals. It never writes synthetic identities,
+     * events, screens, or Experience interactions to production collectors.
+     */
+    suspend fun runTestSessionProbes(): WtsTestSessionProbeRunResult {
+        val active = requireActiveTestSession()
+        val emitted = mutableListOf<String>()
+        val skipped = mutableListOf<String>()
+        val profile = active.testPlan.profile
+        val identityMethods = if (profile?.selected == true && profile.available) {
+            profile.allowedMethods
+        } else {
+            emptyList()
+        }
+        if (identityMethods.isNotEmpty()) {
+            identityMethods.forEach { method ->
+                recordTestSessionSignal(
+                    type = "identity_recorded",
+                    outcome = "passed",
+                    method = method,
+                    propertyKeys = if (method == "increment") listOf("sdk_test_increment") else null,
+                    propertyTypes = if (method == "increment") {
+                        mapOf("sdk_test_increment" to "number")
+                    } else {
+                        null
+                    },
+                    feature = "identity",
+                )
+            }
+            emitted += "identity"
+        } else {
+            skipped += "identity"
+        }
+        val event = active.testPlan.events.firstOrNull()
+        if (event != null) {
+            recordTestSessionSignal(
+                type = "event_recorded",
+                outcome = "passed",
+                eventKey = event.eventKey,
+                propertyKeys = event.properties.map { it.key },
+                propertyTypes = event.properties.associate { it.key to it.type },
+                revenue = if (event.revenueEnabled) {
+                    co.wetus.sdk.internal.TestSessionRevenueDescriptor(
+                        present = true,
+                        currency = "USD",
+                    )
+                } else {
+                    null
+                },
+                feature = "events",
+            )
+            emitted += "event"
+        } else {
+            skipped += "event"
+        }
+        if (active.testPlan.screen?.selected == true) {
+            recordTestSessionSignal(
+                type = "screen_recorded",
+                outcome = "passed",
+                screenName = "sdk_test_screen",
+                feature = "screen",
+            )
+            emitted += "screen"
+        } else {
+            skipped += "screen"
+        }
+        var experienceDecision: WtsTestSessionExperienceDecision? = null
+        val experience = active.testPlan.experience
+        if (!options.experiences.enabled || experience?.selected != true || !experience.available) {
+            skipped += "experiences"
+        } else {
+            val decision = runCatching {
+                val metadata = Metadata.current(appContext)
+                val response: TestSessionExperienceDecisionResponse = postTest(
+                    path = "experiences/decide",
+                    body = json.encodeToString(
+                        TestSessionExperienceDecisionRequest.serializer(),
+                        TestSessionExperienceDecisionRequest(
+                            participantId = active.participantId,
+                            sessionToken = active.sessionToken,
+                            context = TestSessionExperienceDecisionRequest.Context(
+                                type = "screen_view",
+                                screenName = "sdk_test_screen",
+                                locale = metadata.locale ?: "en",
+                            ),
+                        ),
+                    ),
+                    serializer = TestSessionExperienceDecisionResponse.serializer(),
+                )
+                response
+            }.getOrElse { error ->
+                testSessionLastErrorCode = testSessionErrorCode(error)
+                null
+            }
+            experienceDecision = decision?.toPublic()
+            if (decision?.outcome == "ready") {
+                testSession = active.copy(testExperienceDecisionReady = true)
+                persistTestSession()
+                emitted += "experiences"
+            } else {
+                skipped += "experiences"
+            }
+        }
+        flushTestSessionSignals()
+        return WtsTestSessionProbeRunResult(
+            accepted = active.compatible,
+            emitted = emitted,
+            skipped = skipped,
+            pendingSignals = activeTestSession()?.pendingSignals?.size ?: 0,
+            experienceDecision = experienceDecision,
+        )
+    }
+
+    /**
+     * Reports a manually rendered isolated test Experience interaction. This
+     * is accepted only after [runTestSessionProbes] received a `ready` result
+     * from the test decision endpoint; production Experience interactions are
+     * never mirrored into the test session.
+     */
+    suspend fun reportTestSessionExperienceInteraction(
+        interaction: WtsTestSessionExperienceInteraction,
+    ): Boolean {
+        val active = requireActiveTestSession()
+        if (!active.testExperienceDecisionReady) return false
+        recordTestSessionSignal(
+            type = interaction.wireSignalType,
+            outcome = "observed",
+            feature = "experiences",
+        )
+        flushTestSessionSignals()
+        return true
+    }
+
     fun setProfileConsent(consent: WtsProfileConsent) {
+        recordTestSessionSignal(
+            type = "consent",
+            outcome = "observed",
+            feature = "profile",
+        )
         if (consent == WtsProfileConsent.GRANTED) {
             profileConsentGranted = true
             return
@@ -397,6 +768,7 @@ class WtsSdk internal constructor(
         }
         runCatching { flushExperienceInteractions() }
             .onFailure { scheduleRetry() }
+        runCatching { flushTestSessionSignals() }
         val queued = store.load()
         if (queued.isEmpty()) { retryAttempt = 0; return }
         val batch = queued.take(50).toMutableList()
@@ -904,6 +1276,282 @@ class WtsSdk internal constructor(
         )
     }
 
+    private fun activeTestSession(): PersistedTestSession? {
+        val current = testSession ?: return null
+        if (current.sourceKey != appKey) {
+            clearTestSession()
+            return null
+        }
+        if (!isTestSessionExpired(current)) return current
+        clearTestSession()
+        return null
+    }
+
+    private fun requireActiveTestSession(): PersistedTestSession {
+        val current = activeTestSession()
+        if (current == null || !current.compatible) {
+            throw WtsSdkException.InvalidEvent("No compatible SDK Test & Validate session is active.")
+        }
+        return current
+    }
+
+    private fun clearTestSession() {
+        testSessionRetryJob?.cancel()
+        testSessionRetryJob = null
+        testSession = null
+        testSessionStore.clear()
+    }
+
+    private fun persistTestSession() {
+        val current = testSession ?: return
+        if (!testSessionStore.save(current)) {
+            testSessionLastErrorCode = WtsSdkException.Storage.code
+        }
+    }
+
+    private fun isTestSessionExpired(value: PersistedTestSession): Boolean =
+        runCatching { parseExperienceTimestamp(value.expiresAt) <= System.currentTimeMillis() }
+            .getOrDefault(true)
+
+    private fun validateTestPairing(pairing: WtsTestSessionPairing) {
+        pairing.pairingToken?.let {
+            require(it.length in 32..512) { "Pairing tokens must contain 32 to 512 characters." }
+        }
+        pairing.pairingCode?.let {
+            require(it.uppercase().matches(Regex("^[A-Z2-9]{16}$"))) {
+                "Pairing codes must contain 16 uppercase base32 characters."
+            }
+        }
+    }
+
+    private fun testSessionMetadata(sdkFamily: WtsSdkFamily): co.wetus.sdk.internal.TestSessionMetadata {
+        val metadata = Metadata.current(appContext)
+        return co.wetus.sdk.internal.TestSessionMetadata(
+            sdkFamily = sdkFamily.wireValue,
+            appVersion = metadata.appVersion,
+            osVersion = metadata.osVersion,
+            locale = metadata.locale ?: "en",
+        )
+    }
+
+    private fun testSessionCapabilities() = TestSessionCapabilities(
+        deeplink = true,
+        identity = true,
+        screen = true,
+        experiences = options.experiences.enabled,
+        offlineQueue = true,
+    )
+
+    private fun testSessionConsent() = TestSessionConsent(
+        analytics = "granted",
+        profile = profileConsentGranted,
+        experience = experienceConsent.name.lowercase(),
+    )
+
+    private fun recordTestSessionSignal(
+        type: String,
+        outcome: String,
+        method: String? = null,
+        eventKey: String? = null,
+        screenName: String? = null,
+        propertyKeys: List<String>? = null,
+        propertyTypes: Map<String, String>? = null,
+        revenue: co.wetus.sdk.internal.TestSessionRevenueDescriptor? = null,
+        resultCode: String? = null,
+        feature: String? = null,
+    ) {
+        val current = activeTestSession() ?: return
+        if (!current.compatible) return
+        if (
+            type in setOf("experience_impression", "experience_action") &&
+            !current.testExperienceDecisionReady
+        ) {
+            return
+        }
+        if (!isTestSessionSignalAllowed(
+                current.testPlan,
+                type = type,
+                method = method,
+                eventKey = eventKey,
+                hasRevenue = revenue != null,
+            )
+        ) {
+            return
+        }
+        val signals = current.pendingSignals.toMutableList().apply {
+            add(
+                TestSessionSignal(
+                    type = type,
+                    outcome = outcome,
+                    method = method,
+                    eventKey = eventKey,
+                    screenName = screenName,
+                    propertyKeys = propertyKeys?.take(20),
+                    propertyTypes = propertyTypes?.entries?.take(20)?.associate { it.toPair() },
+                    revenue = revenue,
+                    resultCode = resultCode,
+                    feature = feature,
+                ),
+            )
+            while (size > 50) removeAt(0)
+        }
+        testSession = current.copy(pendingSignals = signals)
+        persistTestSession()
+        scope.launch { flushTestSessionSignals() }
+    }
+
+    private fun isTestSessionSignalAllowed(
+        plan: co.wetus.sdk.internal.TestSessionPlan,
+        type: String,
+        method: String?,
+        eventKey: String?,
+        hasRevenue: Boolean = false,
+    ): Boolean = when (type) {
+        "identity_recorded" -> plan.profile?.let {
+            it.selected && it.available && method in it.allowedMethods
+        } ?: false
+        "event_recorded" -> eventKey != null && plan.events.any {
+            it.eventKey == eventKey && (!hasRevenue || it.revenueEnabled)
+        }
+        "screen_recorded" -> plan.screen?.selected == true
+        "deep_link_resolved", "probe_completed" -> plan.deepLink?.let {
+            it.selected && it.available
+        } ?: false
+        "experience_impression", "experience_action" -> plan.experience?.let {
+            it.selected && it.available
+        } ?: false
+        else -> true
+    }
+
+    private fun TestSessionExperienceDecisionResponse.toPublic() =
+        WtsTestSessionExperienceDecision(
+            outcome = outcome,
+            reason = reason,
+            testGrant = testGrant?.let {
+                WtsTestSessionExperienceGrant(it.fixtureId, it.expiresAt)
+            },
+            decision = decision?.let { value ->
+                WtsTestSessionExperienceCampaign(
+                    campaignId = value.campaignId,
+                    campaignVersionId = value.campaignVersionId,
+                    placement = value.placement,
+                    defaultLocale = value.defaultLocale,
+                    variant = value.variant?.let { variant ->
+                        WtsTestSessionExperienceVariant(
+                            id = variant.id,
+                            key = variant.key,
+                            content = variant.content,
+                            assetUrl = variant.asset?.url,
+                        )
+                    },
+                )
+            },
+        )
+
+    private suspend fun flushTestSessionSignals() {
+        val current = activeTestSession() ?: return
+        if (!current.compatible || current.pendingSignals.isEmpty()) return
+        val batch = current.pendingSignals.take(50)
+        try {
+            val response: TestSessionSignalBatchResponse = postTest(
+                path = "signals/batch",
+                body = json.encodeToString(
+                    TestSessionSignalBatch.serializer(),
+                    TestSessionSignalBatch(
+                        participantId = current.participantId,
+                        sessionToken = current.sessionToken,
+                        signals = batch,
+                    ),
+                ),
+                serializer = TestSessionSignalBatchResponse.serializer(),
+            )
+            val terminal = (
+                response.accepted + response.duplicates +
+                    response.rejected.filterNot { it.retryable }.map { it.clientSignalId }
+                ).toSet()
+            val refreshed = activeTestSession() ?: return
+            testSession = refreshed.copy(
+                pendingSignals = refreshed.pendingSignals.filterNot { it.clientSignalId in terminal },
+            )
+            if (response.rejected.any { it.retryable }) {
+                scheduleTestSessionRetry()
+            } else {
+                testSessionRetryAttempt = 0
+            }
+            persistTestSession()
+        } catch (error: WtsSdkException.Server) {
+            testSessionLastErrorCode = error.code
+            if (error.statusCode in setOf(401, 403, 404)) {
+                clearTestSession()
+            } else if (error.statusCode in 400..499 && error.statusCode != 429) {
+                val refreshed = activeTestSession() ?: return
+                testSession = refreshed.copy(pendingSignals = refreshed.pendingSignals.drop(batch.size))
+                persistTestSession()
+            } else {
+                scheduleTestSessionRetry()
+            }
+        } catch (error: Throwable) {
+            testSessionLastErrorCode = testSessionErrorCode(error)
+            scheduleTestSessionRetry()
+        }
+    }
+
+    private fun scheduleTestSessionRetry() {
+        if (testSessionRetryJob?.isActive == true || activeTestSession()?.compatible != true) return
+        val base = min(2.0.pow(testSessionRetryAttempt.coerceAtMost(6)) * 1_000, 60_000.0).toLong()
+        testSessionRetryAttempt = min(testSessionRetryAttempt + 1, 6)
+        testSessionRetryJob = scope.launch {
+            delay((base * Random.nextDouble(0.8, 1.2)).toLong())
+            testSessionRetryJob = null
+            flushTestSessionSignals()
+        }
+    }
+
+    private suspend fun <T> postTest(
+        path: String,
+        body: String,
+        serializer: KSerializer<T>,
+    ): T = post("sdk/test/v1/$path", body, serializer, null)
+
+    private fun testSessionErrorCode(error: Throwable): String = when (error) {
+        is WtsSdkException -> error.code
+        else -> "TEST_SESSION_TRANSPORT_ERROR"
+    }
+
+    private fun List<TestSessionHandshakeResponse.Check>.toPublicChecks() = map {
+        WtsTestSessionCheck(
+            key = it.key,
+            status = it.status,
+            code = it.code,
+            message = it.message,
+        )
+    }
+
+    private fun TestSessionResolveResponse.toPublic() = WtsTestSessionProbeResult(
+        match = match,
+        status = status,
+        code = code,
+        originalUrl = originalUrl,
+        fallbackUrl = fallbackUrl,
+        link = link?.let { item ->
+            WtsTestSessionProbeLink(
+                id = item.id,
+                path = item.path,
+                parameters = item.parameters.mapValues { (_, value) -> value.toWtsValue() },
+            )
+        },
+    )
+
+    private fun JsonElement.toWtsValue(): WtsValue {
+        val primitive = this as? JsonPrimitive ?: return WtsValue.StringValue("")
+        return when {
+            primitive.isString -> WtsValue.StringValue(primitive.content)
+            primitive.content == "true" || primitive.content == "false" ->
+                WtsValue.BooleanValue(primitive.content.toBoolean())
+            else -> WtsValue.NumberValue(primitive.content.toDoubleOrNull() ?: 0.0)
+        }
+    }
+
     private fun parseExperienceTimestamp(value: String): Long {
         if (!value.endsWith("Z")) throw WtsSdkException.InvalidResponse()
         return runCatching {
@@ -1008,6 +1656,13 @@ class WtsSdk internal constructor(
         }
     })
 
+    /** Test-session signals intentionally retain value types, never property values. */
+    private fun WtsValue.testSessionType(): String = when (this) {
+        is WtsValue.StringValue -> "string"
+        is WtsValue.NumberValue -> "number"
+        is WtsValue.BooleanValue -> "boolean"
+    }
+
     private fun Map<String, WtsUserValue>.toUserJson() = JsonObject(
         mapValues { (_, value) -> value.toJson() },
     )
@@ -1047,11 +1702,39 @@ class WtsSdk internal constructor(
             while (size > 100 || encodedIdentityBatchSize(this) > 1_048_576) removeAt(0)
         }
         if (!identityStore.save(queue)) throw WtsSdkException.Storage
+        testSessionIdentityMethods(type, operations).forEach { method ->
+            recordTestSessionSignal(
+                type = "identity_recorded",
+                outcome = "observed",
+                method = method,
+                propertyKeys = if (method == "increment") listOf("sdk_test_increment") else null,
+                propertyTypes = if (method == "increment") {
+                    mapOf("sdk_test_increment" to "number")
+                } else {
+                    null
+                },
+                feature = "identity",
+            )
+        }
         scheduleFlush(0)
     }
 
     private fun requireProfileConsent() {
         if (!profileConsentGranted) throw WtsSdkException.ProfileConsentRequired
+    }
+
+    private fun testSessionIdentityMethods(
+        type: String,
+        operations: UserUpdateWire?,
+    ): List<String> = when (type) {
+        "identify", "reported_attribution", "reset_identity" -> listOf(type)
+        "update_user" -> buildList {
+            if (!operations?.set.isNullOrEmpty()) add("update_user")
+            if (!operations?.setOnce.isNullOrEmpty()) add("set_once")
+            if (!operations?.increment.isNullOrEmpty()) add("increment")
+            if (isEmpty()) add("update_user")
+        }
+        else -> emptyList()
     }
 
     private fun validateAttributes(attributes: Map<String, WtsUserValue>) {
@@ -1194,6 +1877,7 @@ class WtsSdk internal constructor(
                         client,
                         PreferencesEventStore(preferences, json),
                         PreferencesIdentityMutationStore(preferences, json),
+                        PreferencesTestSessionStore(preferences, json),
                         PlayReferrerSource(context.applicationContext),
                     ).also { sdk -> instance = sdk; sdk.scheduleFlush(0) }
                 }

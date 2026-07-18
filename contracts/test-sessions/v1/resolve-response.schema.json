@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wts.is/schemas/sdk/test-sessions/v1/resolve-response.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["match", "status", "code", "originalUrl", "fallbackUrl", "link"],
+  "properties": {
+    "match": { "type": "boolean" },
+    "status": { "enum": ["ready", "blocked"] },
+    "code": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "originalUrl": { "type": "string", "format": "uri", "pattern": "^https://" },
+    "fallbackUrl": { "type": "string", "format": "uri" },
+    "link": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "path", "parameters"],
+          "properties": {
+            "id": { "type": "string", "minLength": 1, "maxLength": 128 },
+            "path": { "type": "string", "pattern": "^/", "maxLength": 512 },
+            "parameters": {
+              "type": "object",
+              "maxProperties": 20,
+              "additionalProperties": {
+                "oneOf": [{ "type": "string" }, { "type": "number" }, { "type": "boolean" }]
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

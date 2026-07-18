@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "participantId": "participant_01",
+  "sessionToken": "test_session_token_000000000000000000000000",
+  "context": {
+    "type": "screen_view",
+    "screenName": "sdk_test_screen",
+    "locale": "en"
+  }
+}

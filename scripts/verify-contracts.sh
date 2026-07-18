@@ -21,3 +21,7 @@ test "$identity_actual" = "$identity_expected" || { echo "Identity contract drif
 experiences_expected=$(ruby -rjson -e 'puts JSON.parse(File.read(".wts-contracts.json")).fetch("experiencesFixtureChecksum")')
 experiences_actual=$(checksum contracts/experiences/v1)
 test "$experiences_actual" = "$experiences_expected" || { echo "Experiences contract drift: expected $experiences_expected, got $experiences_actual" >&2; exit 1; }
+
+test_session_expected=$(python3 -c 'import json; print(json.load(open(".wts-contracts.json"))["testSessionFixtureChecksum"])')
+test_session_actual=$(checksum contracts/test-sessions/v1)
+test "$test_session_actual" = "$test_session_expected" || { echo "SDK Test Session contract drift: expected $test_session_expected, got $test_session_actual" >&2; exit 1; }

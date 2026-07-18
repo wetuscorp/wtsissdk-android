@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wts.is/schemas/sdk/test-sessions/v1/signals-batch-response.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["accepted", "duplicates", "rejected"],
+  "properties": {
+    "accepted": { "type": "array", "items": { "type": "string", "format": "uuid" } },
+    "duplicates": { "type": "array", "items": { "type": "string", "format": "uuid" } },
+    "rejected": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["clientSignalId", "code", "message", "retryable"],
+        "properties": {
+          "clientSignalId": { "type": "string", "format": "uuid" },
+          "code": { "type": "string", "minLength": 1, "maxLength": 128 },
+          "message": { "type": "string", "minLength": 1, "maxLength": 500 },
+          "retryable": { "type": "boolean" }
+        }
+      }
+    }
+  }
+}
