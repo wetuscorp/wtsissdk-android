@@ -27,6 +27,9 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.concurrent.thread
 
+/** The terminal reason is kept separate from the public SDK model. */
+internal enum class ExperienceRenderDismissReason { DISMISSED, AUTO_CLOSED }
+
 internal class ExperienceActivityTracker(application: Application) :
     Application.ActivityLifecycleCallbacks {
     private val current = AtomicReference<Activity?>()
@@ -48,10 +51,11 @@ internal class ExperienceActivityTracker(application: Application) :
 internal class ExperienceRenderHandle(
     private val dialog: Dialog,
     private val handler: Handler,
-    private val onDismiss: () -> Unit,
+    private val onDismiss: (ExperienceRenderDismissReason) -> Unit,
 ) {
     private val active = AtomicBoolean(true)
     private val completed = AtomicBoolean(false)
+    private val dismissReason = AtomicReference(ExperienceRenderDismissReason.DISMISSED)
     private var showAction: Runnable? = null
 
     internal fun bindShowAction(action: Runnable) {
@@ -64,7 +68,11 @@ internal class ExperienceRenderHandle(
         finish(notify = true)
     }
 
-    fun dismiss(notify: Boolean = true) {
+    fun dismiss(
+        reason: ExperienceRenderDismissReason = ExperienceRenderDismissReason.DISMISSED,
+        notify: Boolean = true,
+    ) {
+        dismissReason.set(reason)
         active.set(false)
         showAction?.let(handler::removeCallbacks)
         if (dialog.isShowing) {
@@ -77,7 +85,7 @@ internal class ExperienceRenderHandle(
 
     private fun finish(notify: Boolean) {
         active.set(false)
-        if (completed.compareAndSet(false, true) && notify) onDismiss()
+        if (completed.compareAndSet(false, true) && notify) onDismiss(dismissReason.get())
     }
 }
 
@@ -87,7 +95,10 @@ internal object ExperienceRenderer {
         experience: WtsExperience,
         onImpression: () -> Unit,
         onAction: (WtsExperienceAction) -> Unit,
-        onDismiss: () -> Unit,
+        onDismiss: (ExperienceRenderDismissReason) -> Unit,
+        onShown: () -> Unit,
+        onPresentationSkipped: () -> Unit,
+        canShow: () -> Boolean,
     ): ExperienceRenderHandle? {
         if (activity.isFinishing || activity.isDestroyed) return null
         val content = localizedContent(experience)
@@ -142,6 +153,7 @@ internal object ExperienceRenderer {
         val handle = ExperienceRenderHandle(dialog, handler, onDismiss)
         dialog.setOnDismissListener { handle.didDismiss() }
         dialog.setOnShowListener {
+            onShown()
             dialog.window?.apply {
                 setBackgroundDrawableResource(android.R.color.transparent)
                 val width = if (experience.placement == WtsExperiencePlacement.BOTTOM_SHEET) {
@@ -168,14 +180,19 @@ internal object ExperienceRenderer {
         }
         val showAction = Runnable {
                 if (!handle.isActive()) return@Runnable
-                if (activity.isFinishing || activity.isDestroyed) {
-                    handle.dismiss()
+                if (activity.isFinishing || activity.isDestroyed || !canShow()) {
+                    handle.dismiss(notify = false)
+                    onPresentationSkipped()
                     return@Runnable
                 }
                 dialog.show()
                 experience.content.autoCloseSeconds?.let { seconds ->
                     handler.postDelayed(
-                        { if (handle.isActive()) handle.dismiss() },
+                        {
+                            if (handle.isActive()) {
+                                handle.dismiss(ExperienceRenderDismissReason.AUTO_CLOSED)
+                            }
+                        },
                         (seconds * 1_000).toLong(),
                     )
                 }

@@ -9,6 +9,7 @@ import co.wetus.sdk.internal.EventStore
 import co.wetus.sdk.internal.EventBatchResponse
 import co.wetus.sdk.internal.IdentityMutationRequest
 import co.wetus.sdk.internal.IdentityMutationStore
+import co.wetus.sdk.internal.ExperienceInteractionBatchRequest
 import co.wetus.sdk.internal.PreferencesExperienceInteractionStore
 import co.wetus.sdk.internal.PreferencesEventStore
 import co.wetus.sdk.internal.ReferrerSource
@@ -372,6 +373,148 @@ class WtsSdkTest {
     }
 
     @Test
+    fun expiredManifestClearsManualQueueBeforeOfferingIt() = runTest {
+        var now = 1_700_000_000_000L
+        val fixture = signedContextualExperienceFixture()
+        var deliveries = 0
+        server.dispatcher = experienceDispatcher(fixture)
+        val sdk = createExperienceSdk(
+            fixture = fixture,
+            experienceClockMillis = { now },
+        )
+
+        assertEquals(
+            WtsExperienceResult.ACCEPTED,
+            sdk.setExperienceConsent(WtsExperienceConsent.CONTEXTUAL),
+        )
+        sdk.screen("checkout")
+        assertEquals(1, sdk.getExperienceDiagnostics().queued)
+
+        now = 4_200_000_000_000L
+        sdk.onExperienceAvailable { deliveries += 1 }
+
+        assertEquals(0, deliveries)
+        assertEquals(0, sdk.getExperienceDiagnostics().queued)
+        assertEquals("EXPERIENCE_MANIFEST_EXPIRED", sdk.getExperienceDiagnostics().lastErrorCode)
+    }
+
+    @Test
+    fun expiredManifestRejectsManualRenderAcknowledgementAndClearsRuntime() = runTest {
+        var now = 1_700_000_000_000L
+        val fixture = signedContextualExperienceFixture()
+        var available: WtsExperienceManualPresentation? = null
+        server.dispatcher = experienceDispatcher(fixture)
+        val sdk = createExperienceSdk(
+            fixture = fixture,
+            experienceClockMillis = { now },
+        )
+        sdk.onExperienceAvailable { available = it }
+
+        sdk.setExperienceConsent(WtsExperienceConsent.CONTEXTUAL)
+        sdk.screen("checkout")
+        val presentation = requireNotNull(available)
+
+        now = 4_200_000_000_000L
+        val outcome = sdk.acknowledgeExperienceRender(presentation.handle)
+
+        assertFalse(outcome.accepted)
+        assertEquals("EXPERIENCE_MANIFEST_EXPIRED", outcome.code)
+        assertEquals(0, sdk.getExperienceDiagnostics().queued)
+        assertFalse(sdk.getExperienceDiagnostics().presenting)
+    }
+
+    @Test
+    fun manualModeSharesTheGlobalOverlayCapWithAutomaticDelivery() = runTest {
+        var now = 1_700_000_000_000L
+        val fixture = signedContextualExperienceFixture()
+        val available = mutableListOf<WtsExperienceManualPresentation>()
+        server.dispatcher = experienceDispatcher(fixture)
+        val sdk = createExperienceSdk(
+            fixture = fixture,
+            experienceClockMillis = { now },
+        )
+        sdk.onExperienceAvailable { available += it }
+
+        sdk.setExperienceConsent(WtsExperienceConsent.CONTEXTUAL)
+        repeat(2) {
+            sdk.screen("checkout")
+            val presentation = available.last()
+            assertTrue(sdk.acknowledgeExperienceRender(presentation.handle).accepted)
+            assertTrue(sdk.dismissExperience(presentation.handle).accepted)
+            now += 3_000L
+        }
+
+        sdk.screen("checkout")
+
+        assertEquals(2, available.size)
+        assertEquals(0, sdk.getExperienceDiagnostics().queued)
+        assertEquals(
+            "EXPERIENCE_SESSION_OVERLAY_CAP_REACHED",
+            sdk.getExperienceDiagnostics().lastErrorCode,
+        )
+    }
+
+    @Test
+    fun manualModeCannotBypassCooldownWithANewScreenTrigger() = runTest {
+        var now = 1_700_000_000_000L
+        val fixture = signedContextualExperienceFixture()
+        val available = mutableListOf<WtsExperienceManualPresentation>()
+        server.dispatcher = experienceDispatcher(fixture)
+        val sdk = createExperienceSdk(
+            fixture = fixture,
+            experienceClockMillis = { now },
+        )
+        sdk.onExperienceAvailable { available += it }
+
+        sdk.setExperienceConsent(WtsExperienceConsent.CONTEXTUAL)
+        sdk.screen("checkout")
+        val first = available.single()
+        assertTrue(sdk.acknowledgeExperienceRender(first.handle).accepted)
+        assertTrue(sdk.dismissExperience(first.handle).accepted)
+
+        sdk.screen("checkout")
+        assertEquals(1, available.size)
+        assertEquals(0, sdk.getExperienceDiagnostics().queued)
+        assertEquals("EXPERIENCE_COOLDOWN_ACTIVE", sdk.getExperienceDiagnostics().lastErrorCode)
+
+        now += 3_000L
+        sdk.screen("checkout")
+        assertEquals(2, available.size)
+    }
+
+    @Test
+    fun emitsQueuedOnlyForCandidatesThatSurviveTheQueueCap() = runTest {
+        val fixture = signedContextualExperienceFixture(campaignCount = 6)
+        val interactionBatches = Collections.synchronizedList(mutableListOf<String>())
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse = when (request.path) {
+                "/experiences/v1/bootstrap" -> MockResponse().setResponseCode(200).setBody(fixture.response)
+                "/experiences/v1/interactions/batch" -> {
+                    interactionBatches += request.body.readUtf8()
+                    acceptedExperienceInteractions(interactionBatches.last())
+                }
+                "/api/v1/sdk/v3/events/batch" -> acceptedEvents(request.body.readUtf8())
+                else -> MockResponse().setResponseCode(404)
+            }
+        }
+        val sdk = createExperienceSdk(fixture)
+
+        sdk.setExperienceConsent(WtsExperienceConsent.CONTEXTUAL)
+        sdk.screen("checkout")
+
+        val interactions = interactionBatches.flatMap { batch ->
+            Json.decodeFromString<ExperienceInteractionBatchRequest>(batch).interactions
+        }
+        val queuedCampaigns = interactions
+            .filter { it.type == "queued" }
+            .map { it.campaignId }
+
+        assertEquals(5, sdk.getExperienceDiagnostics().queued)
+        assertEquals(5, queuedCampaigns.size)
+        assertFalse("campaign_checkout_6" in queuedCampaigns)
+    }
+
+    @Test
     fun httpsDeepLinkCannotBypassHostAllowlistWithSchemeAllowlist() = runTest {
         val fixture = signedContextualExperienceFixture()
         var available: WtsExperienceManualPresentation? = null
@@ -651,6 +794,7 @@ class WtsSdkTest {
         testSessionStore: TestSessionStore = MemoryTestSessionStore(),
         referrer: ReferrerSource = ReferrerSource { null },
         options: WtsOptions = WtsOptions(apiBaseUrl = server.url("/").toString()),
+        experienceClockMillis: () -> Long = System::currentTimeMillis,
     ) = WtsSdk(
         context = context,
         appKey = "public-app-key",
@@ -660,6 +804,7 @@ class WtsSdkTest {
         identityStore = identityStore,
         testSessionStore = testSessionStore,
         referrerSource = referrer,
+        experienceClockMillis = experienceClockMillis,
     )
 
     private class MemoryEventStore : EventStore {
@@ -749,6 +894,7 @@ class WtsSdkTest {
         fixture: SignedExperienceFixture,
         allowedDeepLinkHosts: Set<String> = emptySet(),
         allowedDeepLinkSchemes: Set<String> = emptySet(),
+        experienceClockMillis: () -> Long = System::currentTimeMillis,
     ): WtsSdk = createSdk(
         options = WtsOptions(
             apiBaseUrl = server.url("/api/v1").toString(),
@@ -761,6 +907,7 @@ class WtsSdkTest {
                 allowedDeepLinkSchemes = allowedDeepLinkSchemes,
             ),
         ),
+        experienceClockMillis = experienceClockMillis,
     )
 
     private fun fixture(name: String): String = requireNotNull(
@@ -779,7 +926,63 @@ class WtsSdkTest {
         deepLinkTarget: String = "https://allowed.example/checkout",
         expiresAt: String = "2099-01-01T00:00:00.000Z",
         signatureTampered: Boolean = false,
+        campaignCount: Int = 1,
     ): SignedExperienceFixture {
+        require(campaignCount in 1..10)
+        val campaigns = (1..campaignCount).joinToString(",") { index ->
+            val suffix = if (index == 1) "checkout" else "checkout_$index"
+            val version = if (index == 1) "campaign_version_7" else "campaign_version_$index"
+            val variant = if (index == 1) "variant_primary" else "variant_$index"
+            val assignment = if (index == 1) "assignment_checkout" else "assignment_checkout_$index"
+            """
+                {
+                  "campaignId": "campaign_$suffix",
+                  "campaignVersionId": "$version",
+                  "priority": ${101 - index},
+                  "placement": "modal",
+                  "trigger": {
+                    "type": "screen_view",
+                    "screenName": "checkout"
+                  },
+                  "targeting": {
+                    "kind": "condition",
+                    "field": "platform",
+                    "operator": "equals",
+                    "value": "android"
+                  },
+                  "variants": [{
+                    "id": "$variant",
+                    "content": {
+                      "translations": {
+                        "tr": {
+                          "title": "Siparişinizi tamamlayın",
+                          "description": "Güvenli ödeme adımına devam edin.",
+                          "primaryAction": {
+                            "id": "continue",
+                            "label": "Devam et",
+                            "type": "OPEN_DEEP_LINK",
+                            "target": "$deepLinkTarget"
+                          },
+                          "secondaryAction": null
+                        }
+                      },
+                      "closeable": true,
+                      "themePreset": "brand",
+                      "delaySeconds": 0,
+                      "autoCloseSeconds": null
+                    },
+                    "asset": null
+                  }],
+                  "requiresPersonalization": false,
+                  "grant": "signed-contextual-grant-$index",
+                  "assignment": {
+                    "assignmentId": "$assignment",
+                    "kind": "variant",
+                    "variantId": "$variant"
+                  }
+                }
+            """.trimIndent()
+        }
         val payload = """
             {
               "sourceId": "source_mobile",
@@ -787,52 +990,7 @@ class WtsSdkTest {
               "sourceManifestVersion": 7,
               "environment": "production",
               "expiresAt": "$expiresAt",
-              "campaigns": [{
-                "campaignId": "campaign_checkout",
-                "campaignVersionId": "campaign_version_7",
-                "priority": 100,
-                "placement": "modal",
-                "trigger": {
-                  "type": "screen_view",
-                  "screenName": "checkout"
-                },
-                "targeting": {
-                  "kind": "condition",
-                  "field": "platform",
-                  "operator": "equals",
-                  "value": "android"
-                },
-                "variants": [{
-                  "id": "variant_primary",
-                  "content": {
-                    "translations": {
-                      "tr": {
-                        "title": "Siparişinizi tamamlayın",
-                        "description": "Güvenli ödeme adımına devam edin.",
-                        "primaryAction": {
-                          "id": "continue",
-                          "label": "Devam et",
-                          "type": "OPEN_DEEP_LINK",
-                          "target": "$deepLinkTarget"
-                        },
-                        "secondaryAction": null
-                      }
-                    },
-                    "closeable": true,
-                    "themePreset": "brand",
-                    "delaySeconds": 0,
-                    "autoCloseSeconds": null
-                  },
-                  "asset": null
-                }],
-                "requiresPersonalization": false,
-                "grant": "signed-contextual-grant",
-                "assignment": {
-                  "assignmentId": "assignment_checkout",
-                  "kind": "variant",
-                  "variantId": "variant_primary"
-                }
-              }]
+              "campaigns": [$campaigns]
             }
         """.trimIndent().toByteArray()
         val keyPair = signingKeyPair()
