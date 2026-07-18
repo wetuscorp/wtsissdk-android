@@ -31,7 +31,7 @@ dependencies {
     implementation("net.i2p.crypto:eddsa:0.3.0")
     testImplementation(kotlin("test"))
     testImplementation("junit:junit:4.13.2")
-    testImplementation("androidx.test:core:1.6.1")
+    testImplementation("androidx.test:core:1.7.0")
     testImplementation("org.robolectric:robolectric:4.15.1")
     testImplementation("com.squareup.okhttp3:mockwebserver:5.1.0")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")
