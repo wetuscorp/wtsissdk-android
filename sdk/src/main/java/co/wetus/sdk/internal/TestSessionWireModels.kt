@@ -21,7 +21,7 @@ internal data class TestSessionMetadata(
 
 @Serializable
 internal data class TestSessionPairRequest(
-    val schemaVersion: Int = 1,
+    val schemaVersion: Int = 2,
     @EncodeDefault(EncodeDefault.Mode.NEVER) val pairingToken: String? = null,
     @EncodeDefault(EncodeDefault.Mode.NEVER) val pairingCode: String? = null,
     val metadata: TestSessionMetadata,
@@ -56,20 +56,13 @@ internal data class TestSessionCapabilities(
 )
 
 @Serializable
-internal data class TestSessionConsent(
-    val analytics: String,
-    @EncodeDefault(EncodeDefault.Mode.NEVER) val profile: Boolean? = null,
-    @EncodeDefault(EncodeDefault.Mode.NEVER) val experience: String? = null,
-)
-
-@Serializable
 internal data class TestSessionHandshakeRequest(
-    val schemaVersion: Int = 1,
+    val schemaVersion: Int = 2,
     val participantId: String,
     val sessionToken: String,
     val metadata: TestSessionMetadata,
     val capabilities: TestSessionCapabilities,
-    val consent: TestSessionConsent,
+    val consent: String,
 )
 
 @Serializable
@@ -160,7 +153,7 @@ internal data class TestSessionRevenueDescriptor(
 
 @Serializable
 internal data class TestSessionSignalBatch(
-    val schemaVersion: Int = 1,
+    val schemaVersion: Int = 2,
     val participantId: String,
     val sessionToken: String,
     val signals: List<TestSessionSignal>,
@@ -182,7 +175,7 @@ internal data class TestSessionSignalBatchResponse(
 
 @Serializable
 internal data class TestSessionResolveRequest(
-    val schemaVersion: Int = 1,
+    val schemaVersion: Int = 2,
     val participantId: String,
     val sessionToken: String,
     val url: String,
@@ -206,7 +199,7 @@ internal data class TestSessionResolveResponse(
 
 @Serializable
 internal data class TestSessionExperienceDecisionRequest(
-    val schemaVersion: Int = 1,
+    val schemaVersion: Int = 2,
     val participantId: String,
     val sessionToken: String,
     val context: Context,
@@ -229,6 +222,8 @@ internal data class TestSessionExperienceDecisionResponse(
     val reason: String? = null,
     val testGrant: TestGrant? = null,
     val decision: Decision? = null,
+    val renderMode: String,
+    val queue: String,
 ) {
     @Serializable
     internal data class TestGrant(
@@ -259,7 +254,7 @@ internal data class TestSessionExperienceDecisionResponse(
 
 @Serializable
 internal data class TestSessionLeaveRequest(
-    val schemaVersion: Int = 1,
+    val schemaVersion: Int = 2,
     val participantId: String,
     val sessionToken: String,
 )

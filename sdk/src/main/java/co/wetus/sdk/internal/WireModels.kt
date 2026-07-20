@@ -33,7 +33,7 @@ internal data class Metadata(
 
 @Serializable
 internal data class ResolveRequest(
-    val schemaVersion: Int = 3,
+    val schemaVersion: Int = 4,
     val clientEventId: String = UUID.randomUUID().toString(),
     val installId: String,
     val occurredAt: String = isoTimestamp(),
@@ -43,12 +43,27 @@ internal data class ResolveRequest(
 
 @Serializable
 internal data class DeferredRequest(
-    val schemaVersion: Int = 3,
+    val schemaVersion: Int = 4,
     val clientEventId: String = UUID.randomUUID().toString(),
     val installId: String,
     val occurredAt: String = isoTimestamp(),
     val metadata: Metadata,
     val referrer: String,
+)
+
+@Serializable
+internal data class FunctionalResolveRequest(
+    val schemaVersion: Int = 4,
+    val url: String,
+    val platform: String = "android",
+)
+
+@Serializable
+internal data class FunctionalResolveResponse(
+    val matched: Boolean,
+    val destination: String? = null,
+    val path: String? = null,
+    val parameters: JsonObject,
 )
 
 @Serializable
@@ -63,7 +78,7 @@ internal data class ResolveResponse(
 
 @Serializable
 internal data class EventRequest(
-    val schemaVersion: Int = 3,
+    val schemaVersion: Int = 4,
     val clientEventId: String = UUID.randomUUID().toString(),
     val installId: String,
     val sessionId: String? = null,
@@ -82,7 +97,7 @@ internal data class RevenueWire(val amount: String, val currency: String) {
     companion object { fun from(value: WtsRevenue) = RevenueWire(value.amount, value.normalizedCurrency) }
 }
 
-@Serializable internal data class EventBatch(val schemaVersion: Int = 3, val events: List<EventRequest>)
+@Serializable internal data class EventBatch(val schemaVersion: Int = 4, val events: List<EventRequest>)
 
 @Serializable
 internal data class EventBatchResponse(

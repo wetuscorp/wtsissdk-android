@@ -1,32 +1,17 @@
 # wts.is Android sample
 
-The sample demonstrates normal App Link handling. When adding SDK Test &
-Validate, keep the production path unchanged and route a dashboard-issued QR
-pairing URL through `joinTestSession` **before** `handle`:
+The sample follows the `0.5.0-alpha.1` integration: configure once, persist a unified consent decision, and continue sending existing events. Experiences are selected remotely and rendered automatically; the host does not add campaign keys.
+
+For SDK Test Session V2, route a dashboard pairing URL through `joinTestSession` before normal `handle` processing:
 
 ```kotlin
 if (uri.scheme == "https" && uri.path == "/_wts/test/pair") {
-    val result = WtsSdk.shared().joinTestSession(
-        WtsTestSessionPairing.from(uri.toString()),
-    )
-    showSdkTestChecks(result.checks)
+    WtsSdk.shared().joinTestSession(WtsTestSessionPairing.from(uri.toString()))
+    WtsSdk.shared().runTestSessionProbes()
     return
 }
 
 val link = WtsSdk.shared().handle(uri)
 ```
 
-The canonical pairing QR has the form
-`https://<mobile-app-host>/_wts/test/pair?pairing=<dashboard-issued-token>`.
-Use the dashboard-issued token only for the short-lived session; do not place it
-in source control, analytics, or logs.
-
-After joining, inspect `getTestSessionDiagnostics()`, run
-`runTestSessionProbes()`, and use `probeTestSessionUrl()` for a resolver-only
-check. If the probe result contains a ready test Experience decision, show it
-only in a test preview and then call
-`reportTestSessionExperienceInteraction(IMPRESSION)` or `ACTION` after the
-corresponding real test interaction. Call `leaveTestSession()` when done.
-
-These APIs are part of the `0.4.0-alpha.1` source line; use them only after the
-matching Android package release has been published.
+Pairing and probes require granted consent. Test Experiences render automatically in an isolated queue. Do not put the short-lived pairing token in source control, analytics, or logs.

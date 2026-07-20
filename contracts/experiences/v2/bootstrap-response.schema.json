@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wts.is/schemas/experiences/v2/bootstrap-response.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["onlineKeyset", "manifest", "signedPayload", "signature", "keyId", "expiresAt"],
+  "properties": {
+    "onlineKeyset": { "$ref": "common.schema.json#/$defs/onlineKeyset" },
+    "manifest": {
+      "type": "object",
+      "required": ["schemaVersion", "sourceKey", "manifestVersion", "issuedAt", "expiresAt", "campaigns"],
+      "properties": {
+        "schemaVersion": { "const": 2 },
+        "sourceKey": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "manifestVersion": { "type": "integer", "minimum": 1 },
+        "issuedAt": { "type": "string", "format": "date-time" },
+        "expiresAt": { "type": "string", "format": "date-time" },
+        "campaigns": { "type": "array", "maxItems": 500, "items": { "type": "object" } }
+      },
+      "additionalProperties": true
+    },
+    "signedPayload": { "type": "string", "minLength": 1 },
+    "signature": { "type": "string", "minLength": 1 },
+    "keyId": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "expiresAt": { "type": "string", "format": "date-time" }
+  }
+}

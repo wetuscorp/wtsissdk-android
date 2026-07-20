@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wts.is/schemas/experiences/v2/decision-response.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["mode", "decisions", "serverTime"],
+  "properties": {
+    "mode": { "enum": ["contextual", "personalized"] },
+    "decisions": { "type": "array", "maxItems": 5, "items": { "type": "object" } },
+    "serverTime": { "type": "string", "format": "date-time" }
+  }
+}

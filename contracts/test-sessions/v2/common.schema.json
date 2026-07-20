@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wts.is/schemas/sdk/test-sessions/v2/common.json",
+  "$defs": {
+    "metadata": { "$ref": "../v1/common.schema.json#/$defs/metadata" },
+    "propertyType": { "$ref": "../v1/common.schema.json#/$defs/propertyType" },
+    "consent": { "enum": ["pending", "granted", "denied"] },
+    "testPlan": { "$ref": "../v1/common.schema.json#/$defs/testPlan" }
+  }
+}

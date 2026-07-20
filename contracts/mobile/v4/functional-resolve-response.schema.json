@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wts.is/schemas/sdk/mobile/v4/functional-resolve-response.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["matched", "destination", "path", "parameters"],
+  "properties": {
+    "matched": { "type": "boolean" },
+    "destination": { "type": ["string", "null"], "format": "uri", "maxLength": 2048 },
+    "path": { "type": ["string", "null"], "pattern": "^/", "maxLength": 512 },
+    "parameters": {
+      "type": "object",
+      "maxProperties": 20,
+      "additionalProperties": { "$ref": "common.schema.json#/$defs/scalar" }
+    }
+  }
+}

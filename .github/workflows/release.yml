@@ -8,6 +8,8 @@ jobs:
   release:
     runs-on: ubuntu-latest
     environment: release
+    env:
+      ORG_GRADLE_PROJECT_wtsExperienceRootPublicKey: ${{ vars.WTS_EXPERIENCE_ROOT_PUBLIC_KEY }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-java@v5
@@ -16,6 +18,9 @@ jobs:
       - name: Verify tag and contracts
         run: |
           grep -Fq "version = \"${GITHUB_REF_NAME}\"" sdk/build.gradle.kts
+          test -n "$ORG_GRADLE_PROJECT_wtsExperienceRootPublicKey"
+          printf '%s' "$ORG_GRADLE_PROJECT_wtsExperienceRootPublicKey" | base64 --decode > /tmp/wts-experience-root.der
+          openssl pkey -pubin -inform DER -in /tmp/wts-experience-root.der -noout
           chmod +x gradlew scripts/verify-contracts.sh scripts/verify-release-workflow.sh
           scripts/verify-contracts.sh
           scripts/verify-release-workflow.sh

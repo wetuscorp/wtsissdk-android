@@ -1,0 +1,5 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wts.is/schemas/sdk/test-sessions/v2/pair-response.json",
+  "$ref": "../v1/pair-response.schema.json"
+}

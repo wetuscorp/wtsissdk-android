@@ -39,7 +39,7 @@ internal class PreferencesEventStore(
             .commit()
     }
 
-    private companion object { const val KEY = "event-queue-v1" }
+    private companion object { const val KEY = "event-queue-v2" }
 }
 
 internal class PreferencesIdentityMutationStore(
@@ -71,7 +71,7 @@ internal class PreferencesIdentityMutationStore(
                 .commit()
         }
 
-    private companion object { const val KEY = "identity-queue-v1" }
+    private companion object { const val KEY = "identity-queue-v2" }
 }
 
 internal class PreferencesExperienceInteractionStore(
@@ -108,5 +108,5 @@ internal class PreferencesExperienceInteractionStore(
                 .commit()
         }
 
-    private companion object { const val KEY = "experience-interaction-queue-v1" }
+    private companion object { const val KEY = "experience-interaction-queue-v2" }
 }

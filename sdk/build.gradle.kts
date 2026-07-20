@@ -6,12 +6,17 @@ plugins {
 }
 
 group = "co.wetus"
-version = "0.4.0-alpha.1"
+version = "0.5.0-alpha.1"
 
 android {
     namespace = "co.wetus.sdk"
     compileSdk = 36
-    defaultConfig { minSdk = 23; consumerProguardFiles("consumer-rules.pro") }
+    defaultConfig {
+        minSdk = 23
+        consumerProguardFiles("consumer-rules.pro")
+        val rootPublicKey = providers.gradleProperty("wtsExperienceRootPublicKey").orElse("")
+        buildConfigField("String", "WTS_EXPERIENCE_ROOT_PUBLIC_KEY", "\"${rootPublicKey.get()}\"")
+    }
     buildFeatures { buildConfig = true }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17

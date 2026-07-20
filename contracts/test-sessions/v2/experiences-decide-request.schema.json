@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wts.is/schemas/sdk/test-sessions/v2/experiences-decide-request.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "participantId", "sessionToken", "context"],
+  "properties": {
+    "schemaVersion": { "const": 2 },
+    "participantId": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "sessionToken": { "type": "string", "minLength": 32, "maxLength": 512 },
+    "context": { "$ref": "../v1/experiences-decide-request.schema.json#/properties/context" }
+  }
+}

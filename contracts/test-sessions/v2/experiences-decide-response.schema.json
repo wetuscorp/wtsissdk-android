@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wts.is/schemas/sdk/test-sessions/v2/experiences-decide-response.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["outcome", "reason", "testGrant", "decision", "renderMode", "queue"],
+  "properties": {
+    "outcome": { "enum": ["ready", "holdout", "not_eligible", "blocked"] },
+    "reason": { "type": ["string", "null"], "maxLength": 128 },
+    "renderMode": { "const": "automatic" },
+    "queue": { "const": "isolated_test" },
+    "testGrant": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["fixtureId", "expiresAt"],
+          "properties": {
+            "fixtureId": { "type": "string", "minLength": 1, "maxLength": 128 },
+            "expiresAt": { "type": "string", "format": "date-time" }
+          }
+        }
+      ]
+    },
+    "decision": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["campaignId", "campaignVersionId", "placement", "defaultLocale", "variant"],
+          "properties": {
+            "campaignId": { "type": "string", "minLength": 1, "maxLength": 128 },
+            "campaignVersionId": { "type": "string", "minLength": 1, "maxLength": 128 },
+            "placement": { "type": "string", "minLength": 1, "maxLength": 64 },
+            "defaultLocale": { "type": "string", "minLength": 1, "maxLength": 32 },
+            "variant": {
+              "oneOf": [
+                { "type": "null" },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["id", "key", "content", "asset"],
+                  "properties": {
+                    "id": { "type": "string", "minLength": 1, "maxLength": 128 },
+                    "key": { "type": "string", "minLength": 1, "maxLength": 128 },
+                    "content": {},
+                    "asset": {
+                      "oneOf": [
+                        { "type": "null" },
+                        {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": ["url"],
+                          "properties": {
+                            "url": { "type": "string", "format": "uri", "pattern": "^https://" }
+                          }
+                        }
+                      ]
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        }
+      ]
+    }
+  }
+}
