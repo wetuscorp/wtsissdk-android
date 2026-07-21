@@ -29,11 +29,25 @@ jobs:
 
           central_auth="$(printf '%s:%s' "$CENTRAL_USERNAME" "$CENTRAL_PASSWORD" | base64 | tr -d '\n')"
           status_response="$(
-            curl --silent --show-error --fail-with-body \
+            curl --silent --show-error \
+              --write-out $'\n%{http_code}' \
               --header "Authorization: Bearer $central_auth" \
               --get \
               --data-urlencode "id=$DEPLOYMENT_ID" \
               https://central.sonatype.com/api/v1/publisher/status
           )"
 
-          printf '%s' "$status_response" | jq '{deploymentId, deploymentState, errors}'
+          http_status="${status_response##*$'\n'}"
+          response_body="${status_response%$'\n'*}"
+          printf 'Central HTTP status: %s\n' "$http_status"
+
+          if jq --exit-status . >/dev/null 2>&1 <<<"$response_body"; then
+            printf '%s' "$response_body" | jq '{deploymentId, deploymentState, errors}'
+          else
+            printf 'Central response: %s\n' "$response_body"
+          fi
+
+          case "$http_status" in
+            2??) ;;
+            *) exit 1 ;;
+          esac
