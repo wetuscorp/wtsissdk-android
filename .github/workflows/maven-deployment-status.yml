@@ -1,0 +1,39 @@
+name: Maven Deployment Status
+
+on:
+  workflow_dispatch:
+    inputs:
+      deployment_id:
+        description: Central Portal deployment ID
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  status:
+    runs-on: ubuntu-latest
+    environment: release
+    steps:
+      - name: Query Central Portal deployment
+        env:
+          CENTRAL_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+          CENTRAL_PASSWORD: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+          DEPLOYMENT_ID: ${{ inputs.deployment_id }}
+        run: |
+          set -euo pipefail
+          test -n "$CENTRAL_USERNAME"
+          test -n "$CENTRAL_PASSWORD"
+          test -n "$DEPLOYMENT_ID"
+
+          central_auth="$(printf '%s:%s' "$CENTRAL_USERNAME" "$CENTRAL_PASSWORD" | base64 | tr -d '\n')"
+          status_response="$(
+            curl --silent --show-error --fail-with-body \
+              --header "Authorization: Bearer $central_auth" \
+              --get \
+              --data-urlencode "id=$DEPLOYMENT_ID" \
+              https://central.sonatype.com/api/v1/publisher/status
+          )"
+
+          printf '%s' "$status_response" | jq '{deploymentId, deploymentState, errors}'
