@@ -30,9 +30,9 @@ jobs:
           central_auth="$(printf '%s:%s' "$CENTRAL_USERNAME" "$CENTRAL_PASSWORD" | base64 | tr -d '\n')"
           status_response="$(
             curl --silent --show-error \
+              --request POST \
               --write-out $'\n%{http_code}' \
               --header "Authorization: Bearer $central_auth" \
-              --get \
               --data-urlencode "id=$DEPLOYMENT_ID" \
               https://central.sonatype.com/api/v1/publisher/status
           )"

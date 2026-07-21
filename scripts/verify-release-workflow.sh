@@ -22,4 +22,12 @@ ruby -ryaml -e '
   abort "Missing Maven publish step" unless publish
   abort "Maven publish must be conditional on registry absence" unless publish["if"] == "steps.maven_registry.outputs.published != '\''true'\''"
   abort "Maven publish command is missing" unless publish.fetch("run").include?(":sdk:publishToMavenCentral")
+
+  status_workflow = YAML.load_file(".github/workflows/maven-deployment-status.yml")
+  status_steps = status_workflow.fetch("jobs").fetch("status").fetch("steps")
+  status_query = status_steps.find { |step| step["name"] == "Query Central Portal deployment" }
+  abort "Missing Central deployment status query" unless status_query
+  status_run = status_query.fetch("run")
+  abort "Central status API requires POST" unless status_run.include?("--request POST")
+  abort "Central status API must not use GET" if status_run.include?("--get")
 '
