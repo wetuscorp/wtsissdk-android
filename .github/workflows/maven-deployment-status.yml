@@ -42,7 +42,10 @@ jobs:
           printf 'Central HTTP status: %s\n' "$http_status"
 
           if jq --exit-status . >/dev/null 2>&1 <<<"$response_body"; then
-            printf '%s' "$response_body" | jq '{deploymentId, deploymentState, errors}'
+            case "$http_status" in
+              2??) printf '%s' "$response_body" | jq '{deploymentId, deploymentState, errors}' ;;
+              *) printf '%s' "$response_body" | jq . ;;
+            esac
           else
             printf 'Central response: %s\n' "$response_body"
           fi
