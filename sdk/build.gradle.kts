@@ -30,7 +30,7 @@ kotlin { jvmToolchain(17) }
 
 dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
-    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.9.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0")
     implementation("com.squareup.okhttp3:okhttp:5.1.0")
     implementation("com.android.installreferrer:installreferrer:2.2")
     implementation("net.i2p.crypto:eddsa:0.3.0")
