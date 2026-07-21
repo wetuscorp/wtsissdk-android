@@ -1,3 +1,5 @@
+import com.vanniktech.maven.publish.DeploymentValidation
+
 plugins {
     id("com.android.library")
     kotlin("android")
@@ -43,7 +45,10 @@ dependencies {
 }
 
 mavenPublishing {
-    publishToMavenCentral(automaticRelease = true)
+    publishToMavenCentral(
+        automaticRelease = true,
+        validateDeployment = DeploymentValidation.PUBLISHED,
+    )
     if (providers.gradleProperty("signingInMemoryKey").isPresent) {
         signAllPublications()
     }
