@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wts.is/schemas/sdk/mobile/v4/functional-resolve-request.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "url", "platform"],
+  "properties": {
+    "schemaVersion": { "const": 4 },
+    "url": { "type": "string", "format": "uri", "pattern": "^https://", "maxLength": 2048 },
+    "platform": { "enum": ["ios", "android"] }
+  }
+}

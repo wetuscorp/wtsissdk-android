@@ -1,15 +1,16 @@
 {
-  "protocolVersion": 3,
+  "protocolVersion": 4,
   "canonicalRepository": "https://github.com/wetuscorp/wts.is",
-  "canonicalRef": "mobile-protocol-v3-experiences-v1-0.4",
-  "contractPath": "sdks/contracts/mobile/v3",
-  "fixtureChecksum": "72e1d406927a7dc1181e4f9284fca580e50fc03e736379b4e585369c1ee3d535",
-  "experiencesProtocolVersion": 1,
-  "experiencesContractPath": "sdks/contracts/experiences/v1",
-  "experiencesFixtureChecksum": "eb500e8cf2d7d4bd0e6bdb898808358a050195fdeb05c09dcf410ac75a56fb2c",
+  "canonicalRef": "mobile-protocol-v4-experiences-v2-test-sessions-v2-0.5",
+  "contractPath": "sdks/contracts/mobile/v4",
+  "fixtureChecksum": "195bf72d36742045b2e75567df2f764da83330dd4be9c53561e3638fc92d191c",
+  "experiencesProtocolVersion": 2,
+  "experiencesContractPath": "sdks/contracts/experiences/v2",
+  "experiencesFixtureChecksum": "5bb17b24cd59422339f6847491d975c273269b401a1836226a80af70ec8ae32f",
   "identityProtocolVersion": 1,
   "identityContractPath": "sdks/contracts/identity/v1",
   "identityFixtureChecksum": "68a684ce22819418c9bee2b5330fffa6f3d284722b204eead8af0cbf28c6381a",
-  "testSessionProtocolVersion": 1,
-  "testSessionFixtureChecksum": "0876f724ad6504d67e369530122d823fd9bece4a55aaf7fbcf8ca007466783cd"
+  "testSessionProtocolVersion": 2,
+  "testSessionContractPath": "sdks/contracts/test-sessions/v2",
+  "testSessionFixtureChecksum": "f6ee558a8532d944d0b21f20960b5383f152af0bf155b4b474a2858f8ddf18fc"
 }

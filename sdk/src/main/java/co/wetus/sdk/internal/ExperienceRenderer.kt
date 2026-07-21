@@ -94,7 +94,7 @@ internal object ExperienceRenderer {
         activity: Activity,
         experience: WtsExperience,
         onImpression: () -> Unit,
-        onAction: (WtsExperienceAction) -> Unit,
+        onAction: (WtsExperienceAction, (Boolean) -> Unit) -> Unit,
         onDismiss: (ExperienceRenderDismissReason) -> Unit,
         onShown: () -> Unit,
         onPresentationSkipped: () -> Unit,
@@ -144,7 +144,15 @@ internal object ExperienceRenderer {
             card.addView(Button(activity).apply {
                 text = action.label
                 isAllCaps = false
-                setOnClickListener { onAction(action); dialog.dismiss() }
+                setOnClickListener {
+                    isEnabled = false
+                    onAction(action) { handled ->
+                        post {
+                            isEnabled = true
+                            if (handled) dialog.dismiss()
+                        }
+                    }
+                }
             })
         }
         dialog.setContentView(card)

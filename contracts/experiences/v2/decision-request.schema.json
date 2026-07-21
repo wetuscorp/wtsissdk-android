@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wts.is/schemas/experiences/v2/decision-request.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "actorId", "sessionId", "metadata", "candidateVersionIds", "context"],
+  "properties": {
+    "schemaVersion": { "const": 2 },
+    "actorId": { "type": "string", "minLength": 8, "maxLength": 128 },
+    "sessionId": { "type": "string", "minLength": 8, "maxLength": 128 },
+    "testDeviceToken": { "type": "string", "format": "uuid" },
+    "metadata": { "$ref": "common.schema.json#/$defs/metadata" },
+    "candidateVersionIds": {
+      "type": "array",
+      "maxItems": 100,
+      "items": { "type": "string", "minLength": 1, "maxLength": 128 }
+    },
+    "context": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["trigger", "properties"],
+      "properties": {
+        "trigger": { "type": "object" },
+        "pathname": { "type": "string", "pattern": "^/", "maxLength": 2048 },
+        "pageName": { "type": "string", "maxLength": 120 },
+        "screenName": { "type": "string", "maxLength": 120 },
+        "eventKey": { "type": "string", "pattern": "^[a-z][a-z0-9_]{1,63}$" },
+        "properties": {
+          "type": "object",
+          "maxProperties": 20,
+          "additionalProperties": {
+            "oneOf": [
+              { "type": "string", "maxLength": 512 },
+              { "type": "number" },
+              { "type": "boolean" }
+            ]
+          }
+        }
+      }
+    }
+  }
+}

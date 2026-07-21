@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 2,
+  "actorId": "anonymous-1842",
+  "sessionId": "session-1842",
+  "interactions": [
+    {
+      "clientInteractionId": "51f83577-a423-4020-9083-08de9b9d2e91",
+      "grant": "eyJ2IjoyLCJleHAiOiIyMDI2LTA3LTIwVDEyOjEwOjAwLjAwMFoiLCJub25jZSI6IjEyMzQ1Njc4OTAifQ.signature",
+      "campaignId": "campaign-1842",
+      "campaignVersionId": "version-1842",
+      "assignmentId": "assignment-1842",
+      "variantId": "variant-1842",
+      "exposureId": "51f83577-a423-4020-9083-08de9b9d2e92",
+      "type": "primary_action",
+      "actionId": "open-checkout",
+      "actionOutcome": "unhandled",
+      "triggerEventId": "51f83577-a423-4020-9083-08de9b9d2e93",
+      "occurredAt": "2026-07-20T12:00:00.000Z",
+      "metadata": {
+        "platform": "web",
+        "sdkVersion": "0.5.0-alpha.1",
+        "locale": "tr-TR"
+      },
+      "failureCode": null
+    }
+  ]
+}

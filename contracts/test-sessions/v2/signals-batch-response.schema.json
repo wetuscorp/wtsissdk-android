@@ -1,0 +1,5 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wts.is/schemas/sdk/test-sessions/v2/signals-batch-response.json",
+  "$ref": "../v1/signals-batch-response.schema.json"
+}

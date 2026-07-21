@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wts.is/schemas/experiences/v2/interactions-batch.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "actorId", "sessionId", "interactions"],
+  "properties": {
+    "schemaVersion": { "const": 2 },
+    "actorId": { "type": "string", "minLength": 8, "maxLength": 128 },
+    "sessionId": { "type": "string", "minLength": 8, "maxLength": 128 },
+    "interactions": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 50,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["clientInteractionId", "grant", "campaignId", "campaignVersionId", "assignmentId", "variantId", "exposureId", "type", "actionId", "actionOutcome", "triggerEventId", "occurredAt", "metadata", "failureCode"],
+        "properties": {
+          "clientInteractionId": { "type": "string", "format": "uuid" },
+          "grant": { "type": "string", "minLength": 64, "maxLength": 8192 },
+          "campaignId": { "type": "string", "minLength": 1, "maxLength": 128 },
+          "campaignVersionId": { "type": "string", "minLength": 1, "maxLength": 128 },
+          "assignmentId": { "type": ["string", "null"], "maxLength": 128 },
+          "variantId": { "type": ["string", "null"], "maxLength": 128 },
+          "exposureId": { "type": ["string", "null"], "format": "uuid" },
+          "type": { "enum": ["assigned_variant", "assigned_holdout", "eligible", "queued", "render_started", "render_succeeded", "render_failed", "impression", "primary_action", "secondary_action", "dismissed", "auto_closed"] },
+          "actionId": { "type": ["string", "null"], "maxLength": 128 },
+          "actionOutcome": { "enum": ["handled", "unhandled", null] },
+          "triggerEventId": { "type": ["string", "null"], "format": "uuid" },
+          "occurredAt": { "type": "string", "format": "date-time" },
+          "metadata": { "$ref": "common.schema.json#/$defs/metadata" },
+          "failureCode": { "type": ["string", "null"], "maxLength": 64 }
+        }
+      }
+    }
+  }
+}

@@ -3,7 +3,14 @@ set -euo pipefail
 
 ruby -ryaml -e '
   workflow = YAML.load_file(".github/workflows/release.yml")
-  steps = workflow.fetch("jobs").fetch("release").fetch("steps")
+  release = workflow.fetch("jobs").fetch("release")
+  steps = release.fetch("steps")
+
+  root_key = release.fetch("env").fetch("ORG_GRADLE_PROJECT_wtsExperienceRootPublicKey")
+  abort "Release must inject the Experience root public key" unless root_key.include?("WTS_EXPERIENCE_ROOT_PUBLIC_KEY")
+
+  verify = steps.find { |step| step["name"] == "Verify tag and contracts" }
+  abort "Release must validate the Experience root public key" unless verify && verify.fetch("run").include?("openssl pkey -pubin")
 
   registry = steps.find { |step| step["id"] == "maven_registry" }
   abort "Missing Maven Central registry preflight" unless registry

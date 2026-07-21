@@ -1,0 +1,11 @@
+{
+  "outcome": "ready",
+  "reason": null,
+  "testGrant": {
+    "fixtureId": "fixture-1842",
+    "expiresAt": "2026-07-20T12:10:00.000Z"
+  },
+  "decision": null,
+  "renderMode": "automatic",
+  "queue": "isolated_test"
+}

@@ -1,34 +1,22 @@
 package co.wetus.sdk.internal
 
-import co.wetus.sdk.WtsExperienceConsent
 import java.util.UUID
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 
 @Serializable
-internal data class ExperienceSettingsWire(
-    val allowedInternalRoutes: List<String>,
-    val allowedCallbackKeys: List<String>,
-    val allowedDeepLinkHosts: List<String>,
-    val allowedDeepLinkSchemes: List<String>,
-    val allowedWebOrigins: List<String>,
-)
-
-@Serializable
 internal data class ExperienceBootstrapRequest(
-    val schemaVersion: Int = 1,
-    val consent: String,
-    val profileConsentGranted: Boolean,
+    val schemaVersion: Int = 2,
     val actorId: String,
     val sessionId: String,
     val metadata: Metadata,
-    val settings: ExperienceSettingsWire,
     val testDeviceToken: String,
 )
 
 @Serializable
 internal data class ExperienceBootstrapResponse(
+    val onlineKeyset: OnlineKeyset,
     /**
      * Compatibility copy from the collector. It is intentionally decoded as
      * opaque JSON and must never influence runtime behavior; only
@@ -44,8 +32,9 @@ internal data class ExperienceBootstrapResponse(
     data class Manifest(
         val sourceId: String,
         val sourceKey: String,
-        val sourceManifestVersion: Int,
+        val manifestVersion: Int,
         val environment: String = "production",
+        val issuedAt: String,
         val expiresAt: String,
         val campaigns: List<Campaign>,
     )
@@ -69,6 +58,33 @@ internal data class ExperienceBootstrapResponse(
         val assignmentId: String,
         val kind: String,
         val variantId: String? = null,
+    )
+
+    @Serializable
+    data class OnlineKeyset(
+        val version: Int,
+        val issuedAt: String,
+        val expiresAt: String,
+        val keys: List<OnlineKey>,
+        val signedPayload: String,
+        val rootSignature: String,
+    )
+
+    @Serializable
+    data class OnlineKey(
+        val keyId: String,
+        val algorithm: String,
+        val publicKey: String,
+        val notBefore: String,
+        val expiresAt: String,
+    )
+
+    @Serializable
+    data class OnlineKeysetPayload(
+        val version: Int,
+        val issuedAt: String,
+        val expiresAt: String,
+        val keys: List<OnlineKey>,
     )
 }
 
@@ -94,13 +110,10 @@ internal data class ExperienceContextWire(
 
 @Serializable
 internal data class ExperienceDecisionRequest(
-    val schemaVersion: Int = 1,
-    val consent: String,
-    val profileConsentGranted: Boolean,
+    val schemaVersion: Int = 2,
     val actorId: String,
     val sessionId: String,
     val metadata: Metadata,
-    val settings: ExperienceSettingsWire,
     val testDeviceToken: String,
     val candidateVersionIds: List<String>,
     val context: ExperienceContextWire,
@@ -108,7 +121,9 @@ internal data class ExperienceDecisionRequest(
 
 @Serializable
 internal data class ExperienceDecisionResponse(
+    val mode: String,
     val decisions: List<Decision>,
+    val serverTime: String,
 ) {
     @Serializable
     data class Decision(
@@ -167,6 +182,7 @@ internal data class ExperienceInteractionRequest(
     val exposureId: String?,
     val type: String,
     val actionId: String? = null,
+    val actionOutcome: String? = null,
     val triggerEventId: String? = null,
     val occurredAt: String = isoTimestamp(),
     val metadata: Metadata,
@@ -180,9 +196,7 @@ internal data class ExperienceInteractionQueue(
 
 @Serializable
 internal data class ExperienceInteractionBatchRequest(
-    val schemaVersion: Int = 1,
-    val consent: String,
-    val profileConsentGranted: Boolean,
+    val schemaVersion: Int = 2,
     val actorId: String,
     val sessionId: String,
     val interactions: List<ExperienceInteractionRequest>,
@@ -196,5 +210,3 @@ internal data class ExperienceInteractionBatchResponse(
 ) {
     @Serializable data class Rejected(val clientInteractionId: String, val retryable: Boolean)
 }
-
-internal fun WtsExperienceConsent.wireValue() = name.lowercase()

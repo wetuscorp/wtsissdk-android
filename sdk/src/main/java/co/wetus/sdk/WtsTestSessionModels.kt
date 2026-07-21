@@ -48,11 +48,6 @@ enum class WtsSdkFamily(val wireValue: String) {
     REACT_NATIVE("react_native"),
 }
 
-enum class WtsTestSessionExperienceInteraction(val wireSignalType: String) {
-    IMPRESSION("experience_impression"),
-    ACTION("experience_action"),
-}
-
 data class WtsTestSessionCheck(
     val key: String,
     val status: String,
@@ -105,8 +100,8 @@ data class WtsTestSessionProbeRunResult(
     val skipped: List<String>,
     val pendingSignals: Int,
     /**
-     * A test-only manual Experience decision. The SDK never adds this decision
-     * to the normal Experience runtime or renders it automatically.
+     * A test-only Experience decision rendered automatically in an isolated
+     * queue that never enters the production Experience runtime.
      */
     val experienceDecision: WtsTestSessionExperienceDecision? = null,
 )

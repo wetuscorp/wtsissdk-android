@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wts.is/schemas/sdk/mobile/v4/event-batch-response.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["accepted", "duplicates", "rejected"],
+  "properties": {
+    "accepted": { "type": "array", "items": { "type": "string", "format": "uuid" } },
+    "duplicates": { "type": "array", "items": { "type": "string", "format": "uuid" } },
+    "rejected": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["clientEventId", "code", "message", "retryable"],
+        "properties": {
+          "clientEventId": { "type": "string", "format": "uuid" },
+          "code": { "enum": ["EVENT_NOT_REGISTERED", "PROPERTIES_TOO_LARGE", "PROPERTY_REQUIRED", "PROPERTY_NOT_REGISTERED", "PROPERTY_TYPE_INVALID", "REVENUE_NOT_ENABLED"] },
+          "message": { "type": "string", "minLength": 1, "maxLength": 500 },
+          "retryable": { "const": false }
+        }
+      }
+    }
+  }
+}

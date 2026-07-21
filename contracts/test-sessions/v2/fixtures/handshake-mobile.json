@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 2,
+  "participantId": "participant-1842",
+  "sessionToken": "session-token-1842-session-token-1842",
+  "metadata": {
+    "platform": "ios",
+    "sdkFamily": "swift",
+    "sdkVersion": "0.5.0-alpha.1",
+    "locale": "tr-TR"
+  },
+  "capabilities": {
+    "deeplink": true,
+    "identity": true,
+    "screen": true,
+    "experiences": true,
+    "offlineQueue": true
+  },
+  "consent": "granted"
+}

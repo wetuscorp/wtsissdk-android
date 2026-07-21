@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wts.is/schemas/experiences/v2/bootstrap-request.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "actorId", "sessionId", "metadata"],
+  "properties": {
+    "schemaVersion": { "const": 2 },
+    "actorId": { "type": "string", "minLength": 8, "maxLength": 128 },
+    "sessionId": { "type": "string", "minLength": 8, "maxLength": 128 },
+    "testDeviceToken": { "type": "string", "format": "uuid" },
+    "metadata": { "$ref": "common.schema.json#/$defs/metadata" }
+  }
+}

@@ -23,5 +23,5 @@ internal class PreferencesTestSessionStore(
 
     override fun clear(): Boolean = preferences.edit().remove(KEY).commit()
 
-    private companion object { const val KEY = "sdk-test-session-v1" }
+    private companion object { const val KEY = "sdk-test-session-v2" }
 }
