@@ -31,14 +31,14 @@ kotlin { jvmToolchain(17) }
 dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.9.0")
-    implementation("com.squareup.okhttp3:okhttp:5.1.0")
+    implementation("com.squareup.okhttp3:okhttp:5.4.0")
     implementation("com.android.installreferrer:installreferrer:2.2")
     implementation("net.i2p.crypto:eddsa:0.3.0")
     testImplementation(kotlin("test"))
     testImplementation("junit:junit:4.13.2")
     testImplementation("androidx.test:core:1.6.1")
     testImplementation("org.robolectric:robolectric:4.15.1")
-    testImplementation("com.squareup.okhttp3:mockwebserver:5.1.0")
+    testImplementation("com.squareup.okhttp3:mockwebserver:5.4.0")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")
 }
 
